@@ -16,3 +16,9 @@ public interface IPipeProgressReceiver<in TP>
 {
     Task ReceiveProgress(TP progress);
 }
+
+public interface IPipeMessageSerializer
+{
+    Task Serialize<T>(T message, Stream stream, CancellationToken token);
+    ValueTask<T> Deserialize<T>(Stream stream, CancellationToken token);
+}
