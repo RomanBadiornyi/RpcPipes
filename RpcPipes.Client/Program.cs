@@ -9,7 +9,7 @@ const string sendPipe = "TestPipe";
 const string receivePipe = "Client.TestPipe";
 const string progressPipe = "Progress.TestPipe";
 
-const int connections = 64;
+const int connections = 32;
 const int tasks = 8196;
 const int delay = 15;
 const int progress = 3;
@@ -48,8 +48,8 @@ logger.LogInformation("Starting client, press Ctrl+C to stop");
 var stopwatch = new Stopwatch();
 stopwatch.Start();
 
-var requests = Enumerable.Range(0, tasks).Select(i => Task.Run(() => RunTaskHandleError(i))).ToArray();
-var replies = await Task.WhenAll(requests);
+var requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i));
+var replies = await Task.WhenAll(requests.ToArray());
 var errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();
 
 stopwatch.Stop();

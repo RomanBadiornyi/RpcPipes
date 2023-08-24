@@ -127,7 +127,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
         else
             throw new InvalidOperationException($"Message with {requestMessage.Id} already scheduled");
 
-        _logger.LogDebug("scheduled request execution for mesage {MessageId}", requestMessage.Id);
+        _logger.LogDebug("scheduled request execution for message {MessageId}", requestMessage.Id);
         try
         {
             await requestMessage.ReceiveHandle.WaitAsync(requestCancellation.Token);
@@ -233,7 +233,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "unhandled error occured while requesting progress for message {MessageId}", requestMessage.Id);                
+                _logger.LogError(e, "unhandled error occurred while requesting progress for message {MessageId}", requestMessage.Id);                
                 throw;
             }
             finally 

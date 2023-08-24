@@ -5,8 +5,8 @@ using RpcPipes.Transport;
 
 const string receivePipe = "TestPipe";
 const string sendPipe = "Client.TestPipe";
-const string progressPipe = "Progress.Pipe";
-const int connections = 64;
+const string progressPipe = "Progress.TestPipe";
+const int connections = 32;
 
 var cancellationTokenSource = new CancellationTokenSource();
 

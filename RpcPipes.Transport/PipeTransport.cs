@@ -95,7 +95,7 @@ public class PipeTransport
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "unhandled error occured when handling {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
+            _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
         }
     }
 
@@ -148,7 +148,7 @@ public class PipeTransport
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "unhandled error occured while connecting to the server pipe stream {Pipe}", pipeName);
+                _logger.LogError(e, "unhandled error occurred while connecting to the server pipe stream {Pipe}", pipeName);
             }
         }
     }
@@ -184,7 +184,7 @@ public class PipeTransport
             }
             catch (Exception e) 
             {
-                _logger.LogError(e, "unhandled error occured while connecting to the client pipe stream {Pipe}", pipeName);
+                _logger.LogError(e, "unhandled error occurred while connecting to the client pipe stream {Pipe}", pipeName);
             }
         }
     }

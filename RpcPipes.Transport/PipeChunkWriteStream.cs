@@ -9,7 +9,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
 
     private int _bufferPosition;
 
-    private readonly Stream _networkStrem;
+    private readonly Stream _networkStream;
 
     public PipeChunkWriteStream(byte[] buffer, int bufferLength, Stream networkStream)
     {
@@ -20,7 +20,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         _bufferLength = bufferLength;
         _bufferPosition = 1;
 
-        _networkStrem = networkStream;
+        _networkStream = networkStream;
     }
 
     public override void Write(byte[] buffer, int offset, int count)
@@ -82,7 +82,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         _buffer[0] = isCompleted ? (byte)1 : (byte)0;
         if (_bufferPosition > 0) 
         {
-            _networkStrem.Write(_buffer, 0, _bufferPosition);
+            _networkStream.Write(_buffer, 0, _bufferPosition);
             _bufferPosition = isCompleted ? 0 : 1;
         }
     }
@@ -92,7 +92,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         _buffer[0] = isCompleted ? (byte)1 : (byte)0;
         if (_bufferPosition > 0) 
         {
-            await _networkStrem.WriteAsync(_buffer, 0, _bufferPosition, cancellationToken);
+            await _networkStream.WriteAsync(_buffer, 0, _bufferPosition, cancellationToken);
             _bufferPosition = isCompleted ? 0 : 1;
         }
     }

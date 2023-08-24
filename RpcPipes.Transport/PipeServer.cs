@@ -143,26 +143,15 @@ public class PipeServer<TP> : PipeTransport
                     await RunRequest(messageHandler, id, request, c.Token);
                 };
 
-                RunRequestOnThreadPool();
+                _logger.LogDebug("scheduling request execution for message {MessageId}", requestMessage.Id);            
+                Interlocked.Increment(ref _pendingMessages);
+                ThreadPool.QueueUserWorkItem(ExecuteRequest, requestMessage);
             }
             catch (Exception e)
             {
                 _requestsQueue.TryRemove(requestMessage.Id, out _);
                 _logger.LogWarning(e, "unable to consume message {MessageId} due to error", requestMessage.Id);
             }
-        }
-
-        void RunRequestOnThreadPool()
-        {
-            _logger.LogDebug("scheduling request execution for message {MessageId}", requestMessage.Id);            
-            Interlocked.Increment(ref _pendingMessages);
-            ThreadPool.QueueUserWorkItem(state => 
-                {
-                    Interlocked.Decrement(ref _pendingMessages); 
-                    ((PipeServer<TP>)state).ExecuteRequest(requestMessage); 
-                }, 
-                this
-            );
         }
     }
 
@@ -179,7 +168,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogDebug("send progress update for message {MessageId} to client with value {Progress}", progressToken.Id, progress.Progress);
                 if (!progressToken.Active)
                 {
-                    _logger.LogDebug("requested to cancel requets execution for message {MessageId}", progressToken.Id);
+                    _logger.LogDebug("requested to cancel requests execution for message {MessageId}", progressToken.Id);
                     requestMessage.Cancellation.Cancel();
                 }
             }
@@ -193,7 +182,7 @@ public class PipeServer<TP> : PipeTransport
         if (!cancellation.IsCancellationRequested)
         {
             await responseMessage.Action.Invoke(stream);
-            _logger.LogDebug("message {MessageId} handling compelted", responseMessage.Id);
+            _logger.LogDebug("message {MessageId} handling completed", responseMessage.Id);
         }
     }
 
@@ -255,9 +244,11 @@ public class PipeServer<TP> : PipeTransport
         }
     }
 
-    private void ExecuteRequest(RequestMessage requestMessage)
+    private void ExecuteRequest(object state)
     {
+        var requestMessage = (RequestMessage)state;
         _ = ExecuteAsync(_serverTaskCancellation.Token);
+        Interlocked.Decrement(ref _pendingMessages);
 
         async Task ExecuteAsync(CancellationToken token)
         {

@@ -15,13 +15,13 @@ public class PipeProtocol
 
     public async Task TransferMessage<T>(Guid messageId, int bufferSize, T request, CancellationToken token)
     {
-        await BeginTranferMessage();
+        await BeginTransferMessage();
         await WaitAcknowledge(messageId, token);
 
         await StartTransferMessage();
         await WaitAcknowledge(messageId, token);
 
-        async Task BeginTranferMessage()
+        async Task BeginTransferMessage()
         {
             var messageIdArray = messageId.ToByteArray();
             var bufferSizeArray = BitConverter.GetBytes(bufferSize);
@@ -33,7 +33,7 @@ public class PipeProtocol
             {
                 Array.Copy(messageIdArray, buffer, messageIdArray.Length);
                 Array.Copy(bufferSizeArray, 0, buffer, messageIdArray.Length, bufferSizeArray.Length);
-                await _stream.WriteAsync(buffer, 0, buffer.Length, token);
+                await _stream.WriteAsync(buffer, 0, bufferLength, token);
             }
             finally
             {
