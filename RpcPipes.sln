@@ -11,6 +11,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes.Transport.Tests", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes.Models", "RpcPipes.Models\RpcPipes.Models.csproj", "{5155B8F3-5123-4FE0-9762-C3658406DE46}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes.Server", "RpcPipes.Server\RpcPipes.Server.csproj", "{077912BA-C330-4DE7-85AA-78463C0204A0}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -33,6 +35,10 @@ Global
 		{5155B8F3-5123-4FE0-9762-C3658406DE46}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5155B8F3-5123-4FE0-9762-C3658406DE46}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5155B8F3-5123-4FE0-9762-C3658406DE46}.Release|Any CPU.Build.0 = Release|Any CPU
+		{077912BA-C330-4DE7-85AA-78463C0204A0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{077912BA-C330-4DE7-85AA-78463C0204A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{077912BA-C330-4DE7-85AA-78463C0204A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{077912BA-C330-4DE7-85AA-78463C0204A0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
