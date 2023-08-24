@@ -7,7 +7,7 @@ public class RequestException
     public RequestException InnerException { get; set; }
     public List<string> StackTrace { get; set; }
 
-    public Exception ToExceotion()
+    public Exception ToException()
       => new ServiceException(this);
 
     public static RequestException CreateRequestException(Exception ex)
