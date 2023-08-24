@@ -56,12 +56,12 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
         _serverTaskCancellation = new CancellationTokenSource();
 
         var timer = new Timer(_ => {
-            _logger.LogDebug(
-                "active connections {ActiveConnections}. client connections {ClientConnections}",
+            _logger.LogTrace(
+                "DIAGNOSTIC: active connections {ActiveConnections}. client connections {ClientConnections}",
                 _activeConnections, _clientConnections
             );
-            _logger.LogDebug(
-                "sent messages {SentMessages}, received messages {ReceivedMessages}",
+            _logger.LogTrace(
+                "DIAGNOSTIC: sent messages {SentMessages}, received messages {ReceivedMessages}",
                 _sentMessages, _receivedMessages
             );
         }, null, 0, 30000);

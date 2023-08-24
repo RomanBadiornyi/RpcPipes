@@ -92,7 +92,7 @@ public class PipeProtocol
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
-            using var pipeStream = new PipeChunkWriteStream(chunkBuffer, bufferSize, _stream);
+            using var pipeStream = new PipeChunkReadStream(chunkBuffer, bufferSize, _stream);
             message = await _serializer.Deserialize<T>(pipeStream, token);
         }
         finally
