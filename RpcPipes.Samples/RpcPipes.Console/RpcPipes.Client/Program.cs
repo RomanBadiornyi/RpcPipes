@@ -34,66 +34,49 @@ var serializer = new PipeSerializer();
 var progressReplies = new ConcurrentBag<ProgressMessage>();
 var progressMessageReceiver = new PipeProgressReceiver(progressReplies);
 
-var pipeClient = new PipeClient<ProgressMessage>(logger, sendPipe, receivePipe, progressPipe, connections, progressMessageReceiver, serializer)
-{
-    ProgressFrequency = TimeSpan.FromSeconds(progress)
-};
-Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
-    e.Cancel = true;    
-    pipeClient.Dispose();
-};
-
-logger.LogInformation("Starting client, press Ctrl+C to stop");
-
-var stopwatch = new Stopwatch();
-stopwatch.Start();
-
-var requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i));
-var replies = await Task.WhenAll(requests.ToArray());
-var errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();
-
-stopwatch.Stop();
-
-logger.LogInformation("Progress updated {Count}", progressReplies.Count);
-logger.LogInformation("Replies {Count}", replies.Length);
-logger.LogInformation("Errors {Count}", errors.Length);
-logger.LogInformation("Completed in {Time}", stopwatch.Elapsed);
-foreach (var e in errors)
-{
-    logger.LogError(e.Error.ToString());
-}
-Console.ReadKey();
-
-async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i)
-{
-    var request = new RequestMessage($"Sample request {i}", delay);
-    var cts = new CancellationTokenSource();
-    cts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
-    try
+await using (var pipeClient = new PipeClient<ProgressMessage>(
+    logger, sendPipe, receivePipe, progressPipe, connections, progressMessageReceiver, serializer)
     {
-        return (await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, cts.Token), null);
-    }
-    catch (Exception e)
-    {
-        return (null, e);
-    }
-}
+        ProgressFrequency = TimeSpan.FromSeconds(progress)
+    }) 
+{
+    Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
+        e.Cancel = true;    
+        pipeClient.Dispose();
+    };
 
-try
-{
-    await pipeClient.DisposeAsync();
-    return 0;
-}
-catch (OperationCanceledException)
-{
-    return 0;
-}
-catch (Exception e)
-{
-    logger.LogError(e.ToString());
-    return 1;
-}
-finally
-{
-    logger.LogInformation("Server has been stopped");
+    logger.LogInformation("Starting client, press Ctrl+C to interrupt");
+
+    var stopwatch = new Stopwatch();
+    stopwatch.Start();
+
+    var requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i));
+    var replies = await Task.WhenAll(requests.ToArray());
+    var errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();
+
+    stopwatch.Stop();
+
+    logger.LogInformation("Progress updated {Count}", progressReplies.Count);
+    logger.LogInformation("Replies {Count}", replies.Length);
+    logger.LogInformation("Errors {Count}", errors.Length);
+    logger.LogInformation("Completed in {Time}", stopwatch.Elapsed);
+    foreach (var e in errors)
+    {
+        logger.LogError(e.Error.ToString());
+    }
+
+    async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i)
+    {
+        var request = new RequestMessage($"Sample request {i}", delay);
+        var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
+        try
+        {
+            return (await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, cts.Token), null);
+        }
+        catch (Exception e)
+        {
+            return (null, e);
+        }
+    }    
 }
