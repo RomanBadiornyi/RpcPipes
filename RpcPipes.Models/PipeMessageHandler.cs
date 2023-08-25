@@ -11,10 +11,10 @@ public class PipeMessageHandler :
     
     public async Task<ReplyMessage> HandleRequest(Guid messageId, RequestMessage message, CancellationToken token)
     {
-        _handlingMessages.TryAdd(messageId, (DateTime.Now, TimeSpan.FromSeconds(message.DelatySeconds)));
-        if (message.DelatySeconds > 0)
+        _handlingMessages.TryAdd(messageId, (DateTime.Now, TimeSpan.FromSeconds(message.DelaySeconds)));
+        if (message.DelaySeconds > 0)
         {
-            await Task.Delay(TimeSpan.FromSeconds(message.DelatySeconds), token);
+            await Task.Delay(TimeSpan.FromSeconds(message.DelaySeconds), token);
         }
         var reply = new ReplyMessage(message.Message);
         _handlingMessages.TryRemove(messageId, out _);

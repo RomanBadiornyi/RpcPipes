@@ -5,7 +5,7 @@ public class PipeChunkStreamTests
     [TestCase(16 + 1, 16, 16, 16)]
     [TestCase(16 + 1, 12, 60, 60)]
     [TestCase(16 + 1, 12, 14, 60)]
-    public async Task WriteAndReadMultipleTimesContentLessThanBufferAsync_ReadExpected(int bufferLength, int chunkWriteLength, int chunkReadLenth, int dataLength)
+    public async Task WriteAndReadMultipleTimesContentLessThanBufferAsync_ReadExpected(int bufferLength, int chunkWriteLength, int chunkReadLength, int dataLength)
     {
         var dataInputBuffer = new byte[dataLength];
         var dataOutputBuffer = new byte[dataLength];
@@ -29,7 +29,7 @@ public class PipeChunkStreamTests
 
         memoryStream.Position = 0;
 
-        var tempBuffer = new byte[chunkReadLenth];
+        var tempBuffer = new byte[chunkReadLength];
         var readCompleted = false;
         var totalRead = 0;
         int readBytes;
@@ -51,7 +51,7 @@ public class PipeChunkStreamTests
     [TestCase(16 + 1, 16, 16, 16)]
     [TestCase(16 + 1, 12, 60, 60)]
     [TestCase(16 + 1, 12, 14, 60)]
-    public void WriteAndReadMultipleTimesContentLessThanBufferSync_ReadExpected(int bufferLength, int chunkWriteLength, int chunkReadLenth, int dataLength)
+    public void WriteAndReadMultipleTimesContentLessThanBufferSync_ReadExpected(int bufferLength, int chunkWriteLength, int chunkReadLength, int dataLength)
     {
         var dataInputBuffer = new byte[dataLength];
         var dataOutputBuffer = new byte[dataLength];
@@ -75,7 +75,7 @@ public class PipeChunkStreamTests
 
         memoryStream.Position = 0;
 
-        var tempBuffer = new byte[chunkReadLenth];
+        var tempBuffer = new byte[chunkReadLength];
         var readCompleted = false;
         var totalRead = 0;
         int readBytes;

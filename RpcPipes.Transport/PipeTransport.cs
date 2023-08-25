@@ -44,7 +44,7 @@ public class PipeTransport
         }
         catch (IOException)
         {
-            _logger.LogDebug("connection to {Type} stream pipie {Pipe} got interrupted", "server", pipeName);
+            _logger.LogDebug("connection to {Type} stream pipe {Pipe} got interrupted", "server", pipeName);
             return false;
         }
         catch (Exception e)
@@ -114,7 +114,7 @@ public class PipeTransport
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "unhandled error occured when handling {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
+            _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
         }        
     }
 

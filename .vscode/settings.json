@@ -1,3 +1,7 @@
 {
-    "dotnet.defaultSolution": "RpcPipes.sln"
+    "dotnet.defaultSolution": "RpcPipes.sln",
+    "cSpell.enabled": true,
+    "cSpell.words": [
+        "ASPNETCORE"
+    ]
 }
