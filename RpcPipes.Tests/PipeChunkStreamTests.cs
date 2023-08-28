@@ -1,4 +1,4 @@
-namespace RpcPipes.Transport.Tests;
+namespace RpcPipes.Tests;
 
 public class PipeChunkStreamTests
 {

@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RpcPipes.Models;
-using RpcPipes.Transport;
+using RpcPipes;
 
 const string receivePipe = "TestPipe";
 const string sendPipe = "Client.TestPipe";

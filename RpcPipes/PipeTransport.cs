@@ -1,7 +1,7 @@
 using System.IO.Pipes;
 using Microsoft.Extensions.Logging;
 
-namespace RpcPipes.Transport;
+namespace RpcPipes;
 
 public class PipeTransport
 {

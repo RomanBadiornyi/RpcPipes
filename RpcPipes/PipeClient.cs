@@ -3,7 +3,7 @@ using System.IO.Pipes;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
-namespace RpcPipes.Transport;
+namespace RpcPipes;
 
 public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
     where TP : IPipeProgress

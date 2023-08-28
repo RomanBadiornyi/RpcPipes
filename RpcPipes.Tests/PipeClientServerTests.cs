@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using NSubstitute;
 using RpcPipes.Models;
 
-namespace RpcPipes.Transport.Tests;
+namespace RpcPipes.Tests;
 
 [TestFixture]
 public class PipeClientServerTests
@@ -88,4 +88,30 @@ public class PipeClientServerTests
         serverStop.Cancel();
         await serverTask;
     }
+
+    [Test]
+    public async Task RequestReplyWhenHandlerThrows_ErrorReturned()
+    {
+        var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
+        messageHandler.HandleRequest(Arg.Any<Guid>(), Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
+            .Returns<ReplyMessage>(args => throw new InvalidOperationException("handler error"));
+        
+        var pipeServer = new PipeServer<ProgressMessage>(
+            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _serializer);
+
+        var serverStop = new CancellationTokenSource();
+        var serverTask = pipeServer.Start(messageHandler, _messageHandler, serverStop.Token);
+
+        await using (var pipeClient = new PipeClient<ProgressMessage>(
+            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+        {
+            var request = new RequestMessage("hello world", 0);
+            var exception = Assert.ThrowsAsync<ServiceException>(
+                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None));
+            Assert.That(exception.Message, Does.Contain("handler error"));
+        }
+
+        serverStop.Cancel();
+        await serverTask;
+    }    
 }

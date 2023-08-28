@@ -1,4 +1,4 @@
-namespace RpcPipes.Transport;
+namespace RpcPipes;
 
 public interface IPipeProgress
 {

@@ -2,17 +2,20 @@
     <PropertyGroup>
         <LangVersion>10</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
-
-        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-        <Deterministic>true</Deterministic>
-
+        
         <PublishRepositoryUrl>true</PublishRepositoryUrl>
         <EmbedUntrackedSources>true</EmbedUntrackedSources>
         <IncludeSymbols>true</IncludeSymbols>
         <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        
         <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>  
 
         <GitVersionBaseDirectory>$(MSBuildThisFileDirectory)</GitVersionBaseDirectory>      
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(IsCiBuild)' == 'true'">
+        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+        <Deterministic>true</Deterministic>    
     </PropertyGroup>
 
     <ItemGroup Condition="'$(IsTestProject)' == 'true'">

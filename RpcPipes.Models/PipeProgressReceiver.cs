@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using RpcPipes.Transport;
+using RpcPipes;
 
 namespace RpcPipes.Models;
 

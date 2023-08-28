@@ -1,6 +1,6 @@
 using System.Buffers;
 
-namespace RpcPipes.Transport;
+namespace RpcPipes;
 
 public class PipeProtocol
 {

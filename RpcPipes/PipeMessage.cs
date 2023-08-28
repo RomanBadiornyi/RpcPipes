@@ -1,4 +1,4 @@
-namespace RpcPipes.Transport;
+namespace RpcPipes;
 
 public class RequestException
 {
@@ -13,13 +13,16 @@ public class RequestException
     public static RequestException CreateRequestException(Exception ex)
     {
         var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        var isDevelopment = environment?.ToLower() == "development";
+        var isDevelopment = environment == null || environment?.ToLower() == "development";
 
         return new RequestException
         {
-            ClassName = !isDevelopment ? "Exception" : ex.GetType().Name,
-            Message = !isDevelopment ? "Internal Server Error" : ex.Message,
-            StackTrace = !isDevelopment && ex.StackTrace != null ? ex.StackTrace.Split(Environment.NewLine.ToCharArray()).ToList() : new List<string>(),
+            ClassName = !isDevelopment ? 
+                "Exception" : ex.GetType().Name,
+            Message = !isDevelopment ? 
+                "Internal Server Error" : ex.Message,
+            StackTrace = !isDevelopment || ex.StackTrace == null ? 
+                new List<string>() : ex.StackTrace.Split(Environment.NewLine.ToCharArray()).ToList(),
             InnerException = ex.InnerException != null ? CreateRequestException(ex.InnerException) : null            
         };
     }

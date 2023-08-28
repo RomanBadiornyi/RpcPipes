@@ -1,4 +1,4 @@
-using RpcPipes.Transport;
+using RpcPipes;
 
 namespace RpcPipes.Models;
 
