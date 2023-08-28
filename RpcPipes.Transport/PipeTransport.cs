@@ -126,19 +126,12 @@ public class PipeTransport
             var clientPipeStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, Options);
             try
             {
-                if (await TryConnectToServer(clientPipeStream, pipeName, connectionTimeout)) {
+                if (await TryConnectToServer(clientPipeStream, pipeName, connectionTimeout)) 
+                {
                     onConnect.Invoke();
-                    try
+                    while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
-                        while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
-                        {
-                            await action.Invoke(clientPipeStream, token);
-                        }
-                    }
-                    finally
-                    {
-                        DisconnectClient(clientPipeStream, pipeName);
-                        onDisconnect.Invoke();
+                        await action.Invoke(clientPipeStream, token);
                     }
                 }
             }
@@ -149,6 +142,11 @@ public class PipeTransport
             catch (Exception e)
             {
                 _logger.LogError(e, "unhandled error occurred while connecting to the server pipe stream {Pipe}", pipeName);
+            }
+            finally
+            {
+                DisconnectClient(clientPipeStream, pipeName);
+                onDisconnect.Invoke();
             }
         }
     }
@@ -164,17 +162,9 @@ public class PipeTransport
                 if (await WaitForClientConnection(serverPipeStream, pipeName, token))
                 {
                     onConnect.Invoke();
-                    try
+                    while (!token.IsCancellationRequested && serverPipeStream.IsConnected)
                     {
-                        while (!token.IsCancellationRequested && serverPipeStream.IsConnected)
-                        {
-                            await action.Invoke(serverPipeStream, token);
-                        }
-                    }
-                    finally
-                    {
-                        DisconnectServer(serverPipeStream, pipeName);
-                        onDisconnect.Invoke();
+                        await action.Invoke(serverPipeStream, token);
                     }
                 }
             }
@@ -185,7 +175,12 @@ public class PipeTransport
             catch (Exception e) 
             {
                 _logger.LogError(e, "unhandled error occurred while connecting to the client pipe stream {Pipe}", pipeName);
-            }
+            }                
+            finally
+            {
+                DisconnectServer(serverPipeStream, pipeName);
+                onDisconnect.Invoke();
+            }            
         }
     }
 }
