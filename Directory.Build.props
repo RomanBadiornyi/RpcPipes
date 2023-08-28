@@ -1,0 +1,18 @@
+<Project>
+    <PropertyGroup>
+        <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+        <Deterministic>true</Deterministic>
+
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+        <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>  
+
+        <GitVersionBaseDirectory>$(MSBuildThisFileDirectory)</GitVersionBaseDirectory>      
+    </PropertyGroup>
+
+    <Target Name="Test" AfterTargets="AfterBuild">
+        <Message Text="AssemblyVersion: $(AssemblyInformationalVersion)" Importance="High" />
+    </Target>
+</Project>
