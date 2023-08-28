@@ -12,6 +12,6 @@
 
   <ItemGroup>
     <ProjectReference Include="../../../RpcPipes.Models/RpcPipes.Models.csproj" />
-    <ProjectReference Include="../../../RpcPipes.Transport/RpcPipes.Transport.csproj" />
+    <ProjectReference Include="../../../RpcPipes/RpcPipes.csproj" />
   </ItemGroup>
 </Project>

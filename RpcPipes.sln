@@ -3,9 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes.Transport", "RpcPipes.Transport\RpcPipes.Transport.csproj", "{154E1EF2-9775-486E-AD8F-0438B3265717}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes", "RpcPipes\RpcPipes.csproj", "{154E1EF2-9775-486E-AD8F-0438B3265717}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes.Transport.Tests", "RpcPipes.Transport.Tests\RpcPipes.Transport.Tests.csproj", "{7B850A96-1F6A-4707-9F4A-9A8B92CEA938}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes.Tests", "RpcPipes.Tests\RpcPipes.Tests.csproj", "{7B850A96-1F6A-4707-9F4A-9A8B92CEA938}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RpcPipes.Models", "RpcPipes.Models\RpcPipes.Models.csproj", "{5155B8F3-5123-4FE0-9762-C3658406DE46}"
 EndProject

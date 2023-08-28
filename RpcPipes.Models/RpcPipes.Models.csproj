@@ -6,6 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../RpcPipes.Transport/RpcPipes.Transport.csproj" />
+    <ProjectReference Include="../RpcPipes/RpcPipes.csproj" />
   </ItemGroup>
 </Project>
