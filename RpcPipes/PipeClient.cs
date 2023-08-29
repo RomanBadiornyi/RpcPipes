@@ -142,7 +142,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
 
         if (requestMessage.Exception != null)
             throw requestMessage.Exception;
-        var responseError = responseMessage?.Exception;
+        var responseError = responseMessage?.ReplyError;
         if (responseError != null)
             throw responseError.ToException();
         return responseMessage.Reply;

@@ -3,38 +3,11 @@ using Microsoft.Extensions.Logging;
 using NSubstitute;
 using RpcPipes.Models;
 
-namespace RpcPipes.Tests;
+namespace RpcPipes.PipeClientServer.Tests;
 
 [TestFixture]
-public class PipeClientServerTests
-{
-    private ILogger<PipeServer<ProgressMessage>> _serverLogger;
-    private ILogger<PipeClient<ProgressMessage>> _clientLogger;
-    private PipeSerializer _serializer;
-    private PipeMessageHandler _messageHandler;
-    private ConcurrentBag<ProgressMessage> _progressReplies;
-    private PipeProgressReceiver _progressMessageReceiver;
-
-    [SetUp]
-    public void Setup()
-    {
-        _serverLogger = Substitute.For<ILogger<PipeServer<ProgressMessage>>>();        
-        _clientLogger = Substitute.For<ILogger<PipeClient<ProgressMessage>>>();        
-
-        _serializer = new PipeSerializer();
-        
-        _messageHandler = new PipeMessageHandler();
-        
-        _progressReplies = new ConcurrentBag<ProgressMessage>();
-        _progressMessageReceiver = new PipeProgressReceiver(_progressReplies);
-    }
-
-    [TearDown]
-    public void TearDown()
-    {
-        _progressReplies.Clear();
-    }
-
+public class PipeClientServerTests : BasePipeClientServerTests
+{    
     [Test]
     public async Task RequestReply_ReplyReceived()
     {

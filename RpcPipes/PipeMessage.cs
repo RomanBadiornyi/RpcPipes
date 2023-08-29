@@ -43,5 +43,5 @@ public class ServiceException : Exception
 public class PipeMessageResponse<T>
 {
     public T Reply { get; set; }
-    public RequestException Exception { get; set; }
+    public RequestException ReplyError { get; set; }
 }

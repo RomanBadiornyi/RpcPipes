@@ -98,9 +98,9 @@ public class PipeProtocol
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
+            await SendAcknowledge(messageId, true, token);
         }
-
-        await SendAcknowledge(messageId, true, token);
+        
         return message;
     }
 
