@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using Microsoft.Extensions.Logging;
 using NSubstitute;
 using RpcPipes.Models;
 
@@ -12,14 +10,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
     public async Task RequestReply_ReplyReceived()
     {
         var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<Guid>(), Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
+        messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
         
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _serializer);
+            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(messageHandler, _messageHandler, serverStop.Token);
+        var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
@@ -37,14 +35,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
     public async Task RequestReply_ProgressUpdated()
     {
         var progressHandler = Substitute.For<IPipeProgressHandler<ProgressMessage>>();
-        progressHandler.GetProgress(Arg.Any<ProgressToken>(), Arg.Any<bool>())
+        progressHandler.GetProgress(Arg.Any<Guid>())
             .Returns(args => new ProgressMessage(0.1, ""), args => new ProgressMessage(0.5, ""), args => new ProgressMessage(1.0, ""));
         
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _serializer);
+            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, progressHandler, serverStop.Token);
+        var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
@@ -66,14 +64,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
     public async Task RequestReplyWhenHandlerThrows_ErrorReturned()
     {
         var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<Guid>(), Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
+        messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns<ReplyMessage>(args => throw new InvalidOperationException("handler error"));
         
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _serializer);
+            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(messageHandler, _messageHandler, serverStop.Token);
+        var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))

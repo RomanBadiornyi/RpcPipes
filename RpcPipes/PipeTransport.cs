@@ -54,13 +54,14 @@ public class PipeTransport
         }
     }
 
-    protected async Task<bool> TryConnectToServer(NamedPipeClientStream client, string pipeName, TimeSpan timeout)
+    protected async Task<bool> TryConnectToServer(NamedPipeClientStream client, string pipeName, TimeSpan timeout, CancellationToken token)
     {
         using var connectionCancellation = new CancellationTokenSource();
         connectionCancellation.CancelAfter(timeout);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellation.Token, token);
         try
         {
-            await client.ConnectAsync(Timeout.Infinite, connectionCancellation.Token);
+            await client.ConnectAsync(Timeout.Infinite, cancellation.Token);
             return true;
         }
         catch (OperationCanceledException)
@@ -104,7 +105,7 @@ public class PipeTransport
         try
         {
             try
-            {
+            {                
                 client.Close();
             }
             finally
@@ -123,15 +124,17 @@ public class PipeTransport
     {
         while (!token.IsCancellationRequested) 
         {
+            bool isConnected = false;
             var clientPipeStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, Options);
             try
             {
-                if (await TryConnectToServer(clientPipeStream, pipeName, connectionTimeout)) 
+                if (await TryConnectToServer(clientPipeStream, pipeName, connectionTimeout, token)) 
                 {
+                    isConnected = true;
                     onConnect.Invoke();
                     while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
-                        await action.Invoke(clientPipeStream, token);
+                        await action.Invoke(clientPipeStream, token);                        
                     }
                 }
             }
@@ -146,7 +149,8 @@ public class PipeTransport
             finally
             {
                 DisconnectClient(clientPipeStream, pipeName);
-                onDisconnect.Invoke();
+                if (isConnected)
+                    onDisconnect.Invoke();
             }
         }
     }
@@ -156,11 +160,13 @@ public class PipeTransport
     {
         while (!token.IsCancellationRequested)
         {
+            bool isConnected = false;
             var serverPipeStream = new NamedPipeServerStream(pipeName, PipeDirection.InOut, Instances, PipeTransmissionMode.Byte, Options, BufferSize, BufferSize);
             try
             {
                 if (await WaitForClientConnection(serverPipeStream, pipeName, token))
                 {
+                    isConnected = true;
                     onConnect.Invoke();
                     while (!token.IsCancellationRequested && serverPipeStream.IsConnected)
                     {
@@ -179,7 +185,8 @@ public class PipeTransport
             finally
             {
                 DisconnectServer(serverPipeStream, pipeName);
-                onDisconnect.Invoke();
+                if (isConnected)
+                    onDisconnect.Invoke();
             }            
         }
     }

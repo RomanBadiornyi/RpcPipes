@@ -13,7 +13,6 @@ public class PipeServer<TP> : PipeTransport
         public Guid Id { get; set; }
         public CancellationTokenSource Cancellation { get; set; }
         public Func<Guid, CancellationTokenSource, Task> ExecuteAction { get; set; }
-        public bool IsCompleted { get; set; }
     }
 
     private class ResponseMessage
@@ -27,7 +26,7 @@ public class PipeServer<TP> : PipeTransport
     private readonly string _sendPipe;
     private readonly string _receivePipe;
     private readonly string _progressPipe;
-
+    private readonly IPipeProgressHandler<TP> _progressHandler;
     private readonly IPipeMessageSerializer _serializer;
 
     private int _pendingMessages;
@@ -47,7 +46,7 @@ public class PipeServer<TP> : PipeTransport
 
     public TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
 
-    public PipeServer(ILogger<PipeServer<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeMessageSerializer serializer) :
+    public PipeServer(ILogger<PipeServer<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageSerializer serializer) :
         base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
@@ -55,14 +54,13 @@ public class PipeServer<TP> : PipeTransport
         _sendPipe = sendPipe;
         _receivePipe = receivePipe;
         _progressPipe = progressPipe;
-
+        _progressHandler = progressHandler;
         _serializer = serializer;
         _serverTask = null;
     }
 
     public Task Start<TReq, TRep>(
         IPipeMessageHandler<TReq, TRep> messageHandler,
-        IPipeProgressHandler<TP> progressHandler,
         CancellationToken token)
     {
         lock (_sync)
@@ -91,7 +89,7 @@ public class PipeServer<TP> : PipeTransport
                     return RunServerMessageLoop(
                         _serverTaskCancellation.Token,
                         _progressPipe,
-                        (s, c) => HandleProgressMessage(progressHandler, s, c),
+                        (s, c) => HandleProgressMessage(s, c),
                         onConnect: () => Interlocked.Increment(ref _activeConnections),
                         onDisconnect: () => Interlocked.Decrement(ref _activeConnections)
                     );
@@ -128,6 +126,11 @@ public class PipeServer<TP> : PipeTransport
                 requestMessage = new RequestMessage { Id = id };
                 if (!_requestsQueue.TryAdd(id, requestMessage))
                     requestMessage = null;
+                else
+                {
+                    if (messageHandler is IPipeProgressReporter<TP> progressReporter)
+                        _progressHandler.StartMessageHandling(requestMessage.Id, progressReporter);
+                }
             }, cancellation);
         if (messageId != null && requestMessage != null)
         {
@@ -138,10 +141,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogDebug("read request message {MessageId}", requestMessage.Id);
 
                 requestMessage.Cancellation = cancellationSource;
-                requestMessage.ExecuteAction = async (id, c) =>
-                {
-                    await RunRequest(messageHandler, id, request, c.Token);
-                };
+                requestMessage.ExecuteAction = (id, c) => RunRequest(messageHandler, id, request, c.Token);
 
                 _logger.LogDebug("scheduling request execution for message {MessageId}", requestMessage.Id);
                 Interlocked.Increment(ref _pendingMessages);
@@ -152,27 +152,34 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogWarning(e, "unable to consume message {MessageId} due to error, reply error back to client", requestMessage.Id);
                 var replyError = RequestException.CreateRequestException(e);
                 var response = new PipeMessageResponse<TRep> { Reply = default, ReplyError = replyError };
-                await ScheduleResponseReply(requestMessage.Id, response, cancellation);                 
+                await ScheduleResponseReply(requestMessage.Id, response, cancellation);
             }
         }
     }
 
-    private async Task HandleProgressMessage(IPipeProgressHandler<TP> progressHandler, Stream stream, CancellationToken cancellation)
+    private async Task HandleProgressMessage(Stream stream, CancellationToken cancellation)
     {
         var protocol = new PipeProtocol(stream, _serializer);
         var progressToken = await protocol.ReceiveMessage<ProgressToken>(cancellation);
         if (progressToken != null && !cancellation.IsCancellationRequested)
         {
             var progress = default(TP);
-            if (_requestsQueue.TryGetValue(progressToken.Id, out var requestMessage) && requestMessage.Cancellation != null)
+            if (_requestsQueue.TryGetValue(progressToken.Id, out var requestMessage))
             {
-                progress = progressHandler.GetProgress(progressToken, requestMessage.IsCompleted);
-                _logger.LogDebug("send progress update for message {MessageId} to client with value {Progress}", progressToken.Id, progress.Progress);
-                if (!progressToken.Active)
+                if (requestMessage.Cancellation != null)
                 {
-                    _logger.LogDebug("requested to cancel requests execution for message {MessageId}", progressToken.Id);
-                    requestMessage.Cancellation.Cancel();
+                    progress = _progressHandler.GetProgress(progressToken.Id);
+                    _logger.LogDebug("send progress update for message {MessageId} to client with value {Progress}", progressToken.Id, progress.Progress);
+                    if (!progressToken.Active)
+                    {
+                        _logger.LogDebug("requested to cancel requests execution for message {MessageId}", progressToken.Id);
+                        requestMessage.Cancellation.Cancel();
+                    }
                 }
+            }
+            else
+            {
+                _logger.LogWarning("requested progress for unknown message {MessageId}", progressToken.Id);
             }
             await protocol.TransferMessage(progressToken.Id, BufferSize, progress, cancellation);
         }
@@ -197,7 +204,8 @@ public class PipeServer<TP> : PipeTransport
             Interlocked.Increment(ref _activeMessages);
             _logger.LogDebug("handling request for message {MessageId}", id);
             token.ThrowIfCancellationRequested();
-            reply = await messageHandler.HandleRequest(id, request, token);
+            _progressHandler.StartMessageExecute(id, request);
+            reply = await messageHandler.HandleRequest(request, token);
             _logger.LogDebug("handled request for message {MessageId}, sending reply back to client", id);
         }
         catch (OperationCanceledException e)
@@ -214,43 +222,53 @@ public class PipeServer<TP> : PipeTransport
         {
             Interlocked.Increment(ref _handledMessages);
             Interlocked.Decrement(ref _activeMessages);
+            _progressHandler.EndMessageExecute(id);
         }
         var response = new PipeMessageResponse<TRep> { Reply = reply, ReplyError = replyError };
         await ScheduleResponseReply(id, response, token);
     }
 
-    private async Task SendResponse<TRep>(Guid id, PipeMessageResponse<TRep> reply, Stream client, CancellationToken token)
+    private async Task SendResponse<TRep>(Guid id, PipeMessageResponse<TRep> response, NamedPipeClientStream client, CancellationToken token)
     {
         try
         {
             _logger.LogDebug("sending reply for message {MessageId} back to client", id);
             var protocol = new PipeProtocol(client, _serializer);
-            await protocol.TransferMessage(id, BufferSize, reply, token);
+            await protocol.TransferMessage(id, BufferSize, response, token);
             _logger.LogDebug("sent reply for message {MessageId} back to client", id);
+
+            _progressHandler.EndMessageHandling(id);
             _requestsQueue.TryRemove(id, out _);
         }
+        catch (IOException) when (client.IsConnected == false)
+        {
+            //could be that while waiting for reply object we were connected to client pipe and client got disconnected, 
+            //because of this we will end up trying to write message to pipe stream which is disconnected which will raise IOException
+            //in this case return message back to the queue and throw exception in order to re-connect
+            await ScheduleResponseReply(id, response, token);
+            throw;
+        }
         catch (Exception e)
-        {            
-            if (reply.Reply != null) 
+        {
+            if (response.Reply != null)
             {
                 _logger.LogError(e, "error occurred while sending reply for message {MessageId} to the client, sending error back to client", id);
                 var replyError = RequestException.CreateRequestException(e);
-                var response = new PipeMessageResponse<TRep> { Reply = default, ReplyError = replyError };
+                response = new PipeMessageResponse<TRep> { Reply = default, ReplyError = replyError };
                 await ScheduleResponseReply(id, response, token);
             }
-            else 
+            else
             {
                 _logger.LogError(e, "unhandled error occurred while sending reply for message {MessageId} to the client", id);
+                _progressHandler.EndMessageHandling(id);
                 _requestsQueue.TryRemove(id, out _);
             }
-        }        
+        }
     }
 
     private async Task ScheduleResponseReply<TRep>(Guid id, PipeMessageResponse<TRep> response, CancellationToken token)
     {
         _logger.LogDebug("scheduling reply for message {MessageId}", id);
-        if (_requestsQueue.TryGetValue(id, out var requestMessage))
-            requestMessage.IsCompleted = true;
         var responseMessage = new ResponseMessage
         {
             Id = id,
@@ -270,7 +288,7 @@ public class PipeServer<TP> : PipeTransport
             if (!_serverTaskCancellation.IsCancellationRequested)
             {
                 try
-                {                    
+                {
                     var cancellation = CancellationTokenSource.CreateLinkedTokenSource(requestMessage.Cancellation.Token, token);
                     await requestMessage.ExecuteAction.Invoke(requestMessage.Id, cancellation);
                 }
@@ -281,6 +299,7 @@ public class PipeServer<TP> : PipeTransport
             }
             else
             {
+                _progressHandler.EndMessageHandling(requestMessage.Id);
                 _requestsQueue.TryRemove(requestMessage.Id, out _);
             }
         }

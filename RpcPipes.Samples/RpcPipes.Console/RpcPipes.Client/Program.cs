@@ -2,8 +2,10 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using RpcPipes.Models;
 using RpcPipes;
+using RpcPipes.Models;
+using RpcPipes.Models.PipeSerializers;
+using RpcPipes.Models.PipeProgress;
 
 const string sendPipe = "TestPipe";
 const string receivePipe = "Client.TestPipe";

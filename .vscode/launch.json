@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/RpcPipes.Samples/RpcPipes.Console/RpcPipes.Server/bin/Debug/net7.0/RpcPipes.Server.dll",
             "args": [],
-            "cwd": "${workspaceFolder}/RpcPipes.Server",
+            "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopAtEntry": true
         },

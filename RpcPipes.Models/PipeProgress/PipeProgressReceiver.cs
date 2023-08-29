@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
-using RpcPipes;
 
-namespace RpcPipes.Models;
+namespace RpcPipes.Models.PipeProgress;
 
 public class PipeProgressReceiver : IPipeProgressReceiver<ProgressMessage>
 {

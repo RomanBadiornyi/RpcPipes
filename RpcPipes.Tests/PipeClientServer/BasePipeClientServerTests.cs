@@ -2,6 +2,9 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using RpcPipes.Models;
+using RpcPipes.Models.PipeMessageHandlers;
+using RpcPipes.Models.PipeProgress;
+using RpcPipes.Models.PipeSerializers;
 
 namespace RpcPipes.PipeClientServer.Tests;
 
@@ -12,6 +15,7 @@ public class BasePipeClientServerTests
     protected ILogger<PipeClient<ProgressMessage>> _clientLogger;
     protected PipeSerializer _serializer;
     protected PipeMessageHandler _messageHandler;
+    protected PipeProgressMessageHandler _progressHandler;
     protected ConcurrentBag<ProgressMessage> _progressReplies;
     protected PipeProgressReceiver _progressMessageReceiver;
 
@@ -24,6 +28,7 @@ public class BasePipeClientServerTests
         _serializer = new PipeSerializer();
         
         _messageHandler = new PipeMessageHandler();
+        _progressHandler = new PipeProgressMessageHandler();
         
         _progressReplies = new ConcurrentBag<ProgressMessage>();
         _progressMessageReceiver = new PipeProgressReceiver(_progressReplies);

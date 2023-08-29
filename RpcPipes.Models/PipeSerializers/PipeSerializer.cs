@@ -1,6 +1,4 @@
-using RpcPipes;
-
-namespace RpcPipes.Models;
+namespace RpcPipes.Models.PipeSerializers;
 
 public class PipeSerializer : IPipeMessageSerializer
 {

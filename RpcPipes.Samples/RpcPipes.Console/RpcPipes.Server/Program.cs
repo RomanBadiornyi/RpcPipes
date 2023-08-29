@@ -1,7 +1,10 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using RpcPipes.Models;
 using RpcPipes;
+using RpcPipes.Models;
+using RpcPipes.Models.PipeSerializers;
+using RpcPipes.Models.PipeMessageHandlers;
+using RpcPipes.Models.PipeProgress;
 
 const string receivePipe = "TestPipe";
 const string sendPipe = "Client.TestPipe";
@@ -26,15 +29,16 @@ var logger = serviceProvider.GetRequiredService<ILogger<PipeServer<ProgressMessa
 
 var serializer = new PipeSerializer();
 var messageHandler = new PipeMessageHandler();
+var progressHandler = new PipeProgressMessageHandler();
 
-var pipeServer = new PipeServer<ProgressMessage>(logger, sendPipe, receivePipe, progressPipe, connections, serializer);
+var pipeServer = new PipeServer<ProgressMessage>(logger, sendPipe, receivePipe, progressPipe, connections, progressHandler, serializer);
 Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
     e.Cancel = true;
     cancellationTokenSource.Cancel();
 };
 
 logger.LogInformation("Starting Server, press Ctrl+C to stop");
-var serverTask = Task.Run(() => pipeServer.Start(messageHandler, messageHandler, cancellationTokenSource.Token));
+var serverTask = Task.Run(() => pipeServer.Start(messageHandler, cancellationTokenSource.Token));
 
 try
 {

@@ -1,7 +1,6 @@
-using System.Collections.Concurrent;
-using Microsoft.Extensions.Logging;
 using NSubstitute;
 using RpcPipes.Models;
+using RpcPipes.Models.PipeSerializers;
 
 namespace RpcPipes.PipeClientServer.Tests;
 
@@ -16,10 +15,10 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             .Returns<RequestMessage>(args => throw new InvalidOperationException("deserialize server error"));
         
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, serializer);
+            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
 
         var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, _messageHandler, serverStop.Token);
+        var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
@@ -42,10 +41,10 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _serializer);
+            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, _messageHandler, serverStop.Token);
+        var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, serializer))

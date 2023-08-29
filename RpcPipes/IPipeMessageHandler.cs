@@ -2,13 +2,23 @@
 
 public interface IPipeMessageHandler<in T, TOut>
 {
-    Task<TOut> HandleRequest(Guid messageId, T message, CancellationToken token);
+    Task<TOut> HandleRequest(T message, CancellationToken token);
 }
 
-public interface IPipeProgressHandler<out TOut>
+public interface IPipeProgressReporter<out TOut>
     where TOut : IPipeProgress
 {
-    TOut GetProgress(ProgressToken token, bool isCompleted);    
+    TOut GetProgress(object message);
+}
+
+public interface IPipeProgressHandler<TOut>
+    where TOut : IPipeProgress
+{
+    void StartMessageHandling(Guid messageId, IPipeProgressReporter<TOut> progressReporter);    
+    void StartMessageExecute(Guid messageId, object message);
+    TOut GetProgress(Guid messageId);
+    void EndMessageExecute(Guid messageId);
+    void EndMessageHandling(Guid messageId);
 }
 
 public interface IPipeProgressReceiver<in TP>
