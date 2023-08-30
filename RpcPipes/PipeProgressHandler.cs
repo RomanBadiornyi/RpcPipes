@@ -24,7 +24,7 @@ public abstract class PipeProgressHandler<TOut> : IPipeProgressHandler<TOut>
     {
         if (_progressReporterById.TryGetValue(messageId, out var progressReporter))
         {
-            if (_messageIdByHandle.TryGetValue(messageId, out var message))
+            if (progressReporter != null && _messageIdByHandle.TryGetValue(messageId, out var message))
             {
                 var progress = progressReporter.GetProgress(message);
                 if (progress == null)

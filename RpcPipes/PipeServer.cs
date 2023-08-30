@@ -17,8 +17,15 @@ public class PipeServer<TP> : PipeTransport
 
     private class ResponseMessage
     {
-        public Guid Id { get; set; }
-        public Func<NamedPipeClientStream, Task> Action { get; set; }
+        public Guid Id { get; }
+        public string ReplyPipe { get; }
+        public Func<NamedPipeClientStream, CancellationToken, Task> Action { get; set; }
+
+        public ResponseMessage(Guid id, string replyPipe)
+        {
+            Id = id;;
+            ReplyPipe = replyPipe;
+        }
     }
 
     private readonly ILogger<PipeServer<TP>> _logger;
@@ -32,6 +39,7 @@ public class PipeServer<TP> : PipeTransport
     private int _pendingMessages;
     private int _activeMessages;
     private int _handledMessages;
+    private int _replyMessages;    
 
     private int _activeConnections;
     private int _clientConnections;
@@ -42,9 +50,7 @@ public class PipeServer<TP> : PipeTransport
     private CancellationTokenSource _serverTaskCancellation;
 
     private readonly ConcurrentDictionary<Guid, RequestMessage> _requestsQueue = new();
-    private readonly Channel<ResponseMessage> _responseChannel = Channel.CreateUnbounded<ResponseMessage>();
-
-    public TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
+    private readonly ConcurrentDictionary<string, MessageChannel<ResponseMessage>> _responseChannels = new();
 
     public PipeServer(ILogger<PipeServer<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageSerializer serializer) :
         base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
@@ -57,6 +63,12 @@ public class PipeServer<TP> : PipeTransport
         _progressHandler = progressHandler;
         _serializer = serializer;
         _serverTask = null;
+
+        OnServerConnect = () => Interlocked.Increment(ref _activeConnections);
+        OnServerDisconnect = () => Interlocked.Decrement(ref _activeConnections);
+
+        OnClientConnect = () => Interlocked.Increment(ref _clientConnections);
+        OnClientDisconnect = () => Interlocked.Decrement(ref _clientConnections);
     }
 
     public Task Start<TReq, TRep>(
@@ -72,7 +84,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogTrace("DIAGNOSTIC: active connections {ActiveConnections}, client connections {ClientConnections}",
                     _activeConnections, _clientConnections);
                 _logger.LogTrace("DIAGNOSTIC: handled messages {HandledMessages}, pending messages {PendingMessages}, active messages {ActiveMessages}, reply messages {ReplyMessages}",
-                    _handledMessages, _pendingMessages, _activeMessages, _responseChannel.Reader.Count);
+                    _handledMessages, _pendingMessages, _activeMessages, _replyMessages);
             }, null, 0, 30000);
             _serverTaskCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
             _serverTask = Task.WhenAll(
@@ -80,31 +92,20 @@ public class PipeServer<TP> : PipeTransport
                     return RunServerMessageLoop(
                         _serverTaskCancellation.Token,
                         _receivePipe,
-                        (s, c) => HandleReceiveMessage(messageHandler, s, c),
-                        onConnect: () => Interlocked.Increment(ref _activeConnections),
-                        onDisconnect: () => Interlocked.Decrement(ref _activeConnections)
+                        (s, c) => HandleReceiveMessage(messageHandler, s, c)
                     );
                 }),
                 StartServerListener(Instances, () => {
                     return RunServerMessageLoop(
                         _serverTaskCancellation.Token,
                         _progressPipe,
-                        (s, c) => HandleProgressMessage(s, c),
-                        onConnect: () => Interlocked.Increment(ref _activeConnections),
-                        onDisconnect: () => Interlocked.Decrement(ref _activeConnections)
-                    );
-                }),
-                StartServerListener(Instances, () => {
-                    return RunClientMessageLoop(
-                        _serverTaskCancellation.Token,
-                        _sendPipe,
-                        ConnectionTimeout,
-                        HandleReplyMessage,
-                        onConnect: () => Interlocked.Increment(ref _clientConnections),
-                        onDisconnect: () => Interlocked.Decrement(ref _clientConnections)
+                        (s, c) => HandleProgressMessage(s, c)
                     );
                 })
-            ).ContinueWith(_ => {
+            )
+            //wait also until we complete all client connections
+            .ContinueWith(_ => Task.WhenAll(_responseChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()))
+            .ContinueWith(_ => {
                 _started = false;
                 timer.Dispose();
             }, CancellationToken.None);
@@ -127,10 +128,7 @@ public class PipeServer<TP> : PipeTransport
                 if (!_requestsQueue.TryAdd(id, requestMessage))
                     requestMessage = null;
                 else
-                {
-                    if (messageHandler is IPipeProgressReporter<TP> progressReporter)
-                        _progressHandler.StartMessageHandling(requestMessage.Id, progressReporter);
-                }
+                    _progressHandler.StartMessageHandling(requestMessage.Id, messageHandler as IPipeProgressReporter<TP>);
             }, cancellation);
         if (messageId != null && requestMessage != null)
         {
@@ -152,7 +150,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogWarning(e, "unable to consume message {MessageId} due to error, reply error back to client", requestMessage.Id);
                 var replyError = RequestException.CreateRequestException(e);
                 var response = new PipeMessageResponse<TRep> { Reply = default, ReplyError = replyError };
-                await ScheduleResponseReply(requestMessage.Id, response, cancellation);
+                ScheduleResponseReply(requestMessage.Id, response);
             }
         }
     }
@@ -182,16 +180,6 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogWarning("requested progress for unknown message {MessageId}", progressToken.Id);
             }
             await protocol.TransferMessage(progressToken.Id, BufferSize, progress, cancellation);
-        }
-    }
-
-    private async Task HandleReplyMessage(NamedPipeClientStream stream, CancellationToken cancellation)
-    {
-        var responseMessage = await _responseChannel.Reader.ReadAsync(cancellation);
-        if (!cancellation.IsCancellationRequested)
-        {
-            await responseMessage.Action.Invoke(stream);
-            _logger.LogDebug("message {MessageId} handling completed", responseMessage.Id);
         }
     }
 
@@ -225,11 +213,13 @@ public class PipeServer<TP> : PipeTransport
             _progressHandler.EndMessageExecute(id);
         }
         var response = new PipeMessageResponse<TRep> { Reply = reply, ReplyError = replyError };
-        await ScheduleResponseReply(id, response, token);
+        ScheduleResponseReply(id, response);
     }
 
-    private async Task SendResponse<TRep>(Guid id, PipeMessageResponse<TRep> response, NamedPipeClientStream client, CancellationToken token)
+    private async Task SendResponse<TRep>(
+        Guid id, PipeMessageResponse<TRep> response, NamedPipeClientStream client, CancellationToken token)
     {
+        Interlocked.Decrement(ref _replyMessages);
         try
         {
             _logger.LogDebug("sending reply for message {MessageId} back to client", id);
@@ -242,10 +232,6 @@ public class PipeServer<TP> : PipeTransport
         }
         catch (IOException) when (client.IsConnected == false)
         {
-            //could be that while waiting for reply object we were connected to client pipe and client got disconnected, 
-            //because of this we will end up trying to write message to pipe stream which is disconnected which will raise IOException
-            //in this case return message back to the queue and throw exception in order to re-connect
-            await ScheduleResponseReply(id, response, token);
             throw;
         }
         catch (Exception e)
@@ -255,7 +241,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogError(e, "error occurred while sending reply for message {MessageId} to the client, sending error back to client", id);
                 var replyError = RequestException.CreateRequestException(e);
                 response = new PipeMessageResponse<TRep> { Reply = default, ReplyError = replyError };
-                await ScheduleResponseReply(id, response, token);
+                ScheduleResponseReply(id, response);
             }
             else
             {
@@ -266,15 +252,21 @@ public class PipeServer<TP> : PipeTransport
         }
     }
 
-    private async Task ScheduleResponseReply<TRep>(Guid id, PipeMessageResponse<TRep> response, CancellationToken token)
+    private void ScheduleResponseReply<TRep>(Guid id, PipeMessageResponse<TRep> response)
     {
+        Interlocked.Increment(ref _replyMessages);
         _logger.LogDebug("scheduling reply for message {MessageId}", id);
-        var responseMessage = new ResponseMessage
+        var responseMessage = new ResponseMessage(id, _sendPipe)
         {
-            Id = id,
-            Action = client => SendResponse(id, response, client, token)
+            Action = (s, c) => SendResponse(id, response, s, c)
         };
-        await _responseChannel.Writer.WriteAsync(responseMessage, CancellationToken.None);
+
+        var pipeName = responseMessage.ReplyPipe;
+        ProcessClientMessage(
+            _responseChannels,
+            pipeName,
+            responseMessage,
+            (r, s, c) => r?.Action.Invoke(s, c), _serverTaskCancellation.Token);
     }
 
     private void ExecuteRequest(object state)

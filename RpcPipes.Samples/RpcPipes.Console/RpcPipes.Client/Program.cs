@@ -50,22 +50,34 @@ await using (var pipeClient = new PipeClient<ProgressMessage>(
     logger.LogInformation("Starting client, press Ctrl+C to interrupt");
 
     var stopwatch = new Stopwatch();
-    stopwatch.Start();
-
-    var requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i));
-    var replies = await Task.WhenAll(requests.ToArray());
-    var errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();
-
-    stopwatch.Stop();
-
-    logger.LogInformation("Progress updated {Count}", progressReplies.Count);
-    logger.LogInformation("Replies {Count}", replies.Length);
-    logger.LogInformation("Errors {Count}", errors.Length);
-    logger.LogInformation("Completed in {Time}", stopwatch.Elapsed);
-    foreach (var e in errors)
+    IEnumerable<Task<(ReplyMessage Reply, Exception Error)>> requests = null;
+    (ReplyMessage Reply, Exception Error)[] replies = null;
+    (ReplyMessage Reply, Exception Error)[] errors = null;
+    try
     {
-        logger.LogError(e.Error.ToString());
+        stopwatch.Start();
+        requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i));
+        replies = await Task.WhenAll(requests.ToArray());
+        errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();
+        stopwatch.Stop();        
     }
+    catch (Exception e)
+    {
+        logger.LogError(e, "unhandled error");     
+    }
+    finally
+    {
+        logger.LogInformation("Progress updated {Count}", progressReplies.Count);
+        logger.LogInformation("Replies {Count}", replies.Length);
+        logger.LogInformation("Errors {Count}", errors.Length);
+        logger.LogInformation("Completed in {Time}", stopwatch.Elapsed);
+        foreach (var e in errors)
+        {
+            logger.LogError(e.Error.ToString());
+        }        
+    }
+    
+    await serviceProvider.DisposeAsync();
 
     async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i)
     {

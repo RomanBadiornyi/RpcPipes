@@ -18,7 +18,7 @@ public class PipeMessageHandler :
         return reply;
     }
 
-    public ProgressMessage GetProgress(object message)
+    public virtual ProgressMessage GetProgress(object message)
     {
         if (_handlingMessages.TryGetValue(message, out var handle))
         {
