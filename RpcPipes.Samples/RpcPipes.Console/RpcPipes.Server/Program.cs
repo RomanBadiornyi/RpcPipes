@@ -7,7 +7,6 @@ using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeProgress;
 
 const string receivePipe = "TestPipe";
-const string sendPipe = "Client.TestPipe";
 const string progressPipe = "Progress.TestPipe";
 const int connections = 32;
 
@@ -31,7 +30,7 @@ var serializer = new PipeSerializer();
 var messageHandler = new PipeMessageHandler();
 var progressHandler = new PipeProgressMessageHandler();
 
-var pipeServer = new PipeServer<ProgressMessage>(logger, sendPipe, receivePipe, progressPipe, connections, progressHandler, serializer);
+var pipeServer = new PipeServer<ProgressMessage>(logger, receivePipe, progressPipe, connections, progressHandler, serializer);
 Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
     e.Cancel = true;
     cancellationTokenSource.Cancel();

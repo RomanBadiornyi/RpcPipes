@@ -8,7 +8,6 @@ using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeProgress;
 
 const string sendPipe = "TestPipe";
-const string receivePipe = "Client.TestPipe";
 const string progressPipe = "Progress.TestPipe";
 
 const int connections = 32;
@@ -37,7 +36,7 @@ var progressReplies = new ConcurrentBag<ProgressMessage>();
 var progressMessageReceiver = new PipeProgressReceiver(progressReplies);
 
 await using (var pipeClient = new PipeClient<ProgressMessage>(
-    logger, sendPipe, receivePipe, progressPipe, connections, progressMessageReceiver, serializer)
+    logger, sendPipe, progressPipe, Guid.NewGuid(), connections, progressMessageReceiver, serializer)
     {
         ProgressFrequency = TimeSpan.FromSeconds(progress)
     }) 

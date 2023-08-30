@@ -43,6 +43,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
 
     private readonly string _sendPipe;
     private readonly string _progressPipe;
+    private readonly Guid _receivePipe;
 
     private int _activeConnections;
     private int _clientConnections;
@@ -56,8 +57,15 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
 
     public TimeSpan ProgressFrequency = TimeSpan.FromSeconds(5);
 
-    public PipeClient(ILogger<PipeClient<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressReceiver<TP> progressHandler, IPipeMessageWriter serializer) :
-        base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
+    public PipeClient(
+        ILogger<PipeClient<TP>> logger, 
+        string sendPipe,          
+        string progressPipe, 
+        Guid receivePipe,
+        int instances, 
+        IPipeProgressReceiver<TP> progressHandler, 
+        IPipeMessageWriter serializer) :
+            base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
 
@@ -66,6 +74,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
 
         _sendPipe = sendPipe;
         _progressPipe = progressPipe;
+        _receivePipe = receivePipe;
 
         _serverTaskCancellation = new CancellationTokenSource();
 
@@ -90,7 +99,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
                 StartServerListener(Instances, () => {
                     return RunServerMessageLoop(
                         _serverTaskCancellation.Token,
-                        receivePipe,
+                        receivePipe.ToString(),
                         HandleReceiveMessage
                     );
                 })
@@ -309,7 +318,8 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
         {
             _logger.LogDebug("sending request message {MessageId} to server", id);
             var protocol = new PipeProtocol(client, _serializer);
-            await protocol.TransferMessage(id, BufferSize, request, token);
+            await protocol.BeginTransferMessageAsync(id, BufferSize, _receivePipe, token);
+            await protocol.EndTransferMessage(id, request, BufferSize, token);
             _logger.LogDebug("sent request message {MessageId} to server", id);
         }
         catch (Exception e)

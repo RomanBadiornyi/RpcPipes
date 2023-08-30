@@ -15,14 +15,15 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
         
+        var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
@@ -40,22 +41,22 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
         
+        var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
-        await Task.Delay(10000);
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
@@ -73,14 +74,15 @@ public class PipeClientServerTests : BasePipeClientServerTests
         progressHandler.GetProgress(Arg.Any<Guid>())
             .Returns(args => new ProgressMessage(0.1, ""), args => new ProgressMessage(0.5, ""), args => new ProgressMessage(1.0, ""));
         
+        var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, progressHandler, _serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 1, progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             pipeClient.ProgressFrequency = TimeSpan.FromMilliseconds(10);
             var request = new RequestMessage("hello world", 0.1);
@@ -109,14 +111,15 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns(args => _serializer.Serialize((PipeMessageResponse<ReplyMessage>)args[0], (Stream)args[1], (CancellationToken)args[2]))
             .AndDoes(x => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
 
+        var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             pipeClient.ProgressFrequency = TimeSpan.FromMilliseconds(10);
             var request = new RequestMessage("hello world", 0.1);
@@ -136,14 +139,15 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns<ReplyMessage>(args => throw new InvalidOperationException("handler error"));
         
+        var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var exception = Assert.ThrowsAsync<PipeServerException>(

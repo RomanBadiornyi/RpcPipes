@@ -30,7 +30,6 @@ public class PipeServer<TP> : PipeTransport
 
     private readonly ILogger<PipeServer<TP>> _logger;
 
-    private readonly string _sendPipe;
     private readonly string _receivePipe;
     private readonly string _progressPipe;
     private readonly IPipeProgressHandler<TP> _progressHandler;
@@ -52,12 +51,11 @@ public class PipeServer<TP> : PipeTransport
     private readonly ConcurrentDictionary<Guid, RequestMessage> _requestsQueue = new();
     private readonly ConcurrentDictionary<string, MessageChannel<ResponseMessage>> _responseChannels = new();
 
-    public PipeServer(ILogger<PipeServer<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageWriter serializer) :
+    public PipeServer(ILogger<PipeServer<TP>> logger, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageWriter serializer) :
         base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
 
-        _sendPipe = sendPipe;
         _receivePipe = receivePipe;
         _progressPipe = progressPipe;
         _progressHandler = progressHandler;
@@ -120,8 +118,8 @@ public class PipeServer<TP> : PipeTransport
         RequestMessage requestMessage = null;
 
         var protocol = new PipeProtocol(stream, _serializer);
-        var (messageId, bufferSize) = await protocol
-            .BeginReceiveMessage(id => {
+        var (messageId, replyPipe, bufferSize) = await protocol
+            .BeginReceiveMessageAsync(id => {
                 //ensure we add current request to outstanding messages before we complete reading request payload
                 //this way we ensure that when client starts checking progress - we already can reply as we know about this message
                 requestMessage = new RequestMessage { Id = id };
@@ -130,7 +128,7 @@ public class PipeServer<TP> : PipeTransport
                 else
                     _progressHandler.StartMessageHandling(requestMessage.Id, messageHandler as IPipeProgressReporter<TP>);
             }, cancellation);
-        if (messageId != null && requestMessage != null)
+        if (messageId != null && replyPipe != null && requestMessage != null)
         {
             try
             {
@@ -139,7 +137,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogDebug("read request message {MessageId}", requestMessage.Id);
 
                 requestMessage.Cancellation = cancellationSource;
-                requestMessage.ExecuteAction = (id, c) => RunRequest(messageHandler, id, request, c.Token);
+                requestMessage.ExecuteAction = (id, c) => RunRequest(messageHandler, id, replyPipe.Value, request, c.Token);
 
                 _logger.LogDebug("scheduling request execution for message {MessageId}", requestMessage.Id);
                 Interlocked.Increment(ref _pendingMessages);
@@ -150,7 +148,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogWarning(e, "unable to consume message {MessageId} due to error, reply error back to client", requestMessage.Id);
                 var response = _serializer.CreateResponseContainer<TRep>();
                 response.SetRequestException(e);
-                ScheduleResponseReply(requestMessage.Id, response);
+                ScheduleResponseReply(requestMessage.Id, replyPipe.Value, response);
             }
         }
     }
@@ -183,7 +181,8 @@ public class PipeServer<TP> : PipeTransport
         }
     }
 
-    private async Task RunRequest<TReq, TRep>(IPipeMessageHandler<TReq, TRep> messageHandler, Guid id, TReq request, CancellationToken token)
+    private async Task RunRequest<TReq, TRep>(
+        IPipeMessageHandler<TReq, TRep> messageHandler, Guid id, Guid replyPipe, TReq request, CancellationToken token)
     {
         var response = _serializer.CreateResponseContainer<TRep>();
         try
@@ -211,11 +210,11 @@ public class PipeServer<TP> : PipeTransport
             Interlocked.Decrement(ref _activeMessages);
             _progressHandler.EndMessageExecute(id);
         }
-        ScheduleResponseReply(id, response);
+        ScheduleResponseReply(id, replyPipe, response);
     }
 
     private async Task SendResponse<TRep>(
-        Guid id, PipeMessageResponse<TRep> response, NamedPipeClientStream client, CancellationToken token)
+        Guid id, Guid replyPipe, PipeMessageResponse<TRep> response, NamedPipeClientStream client, CancellationToken token)
     {
         Interlocked.Decrement(ref _replyMessages);
         try
@@ -239,7 +238,7 @@ public class PipeServer<TP> : PipeTransport
                 _logger.LogError(e, "error occurred while sending reply for message {MessageId} to the client, sending error back to client", id);
                 response = _serializer.CreateResponseContainer<TRep>();
                 response.SetRequestException(e);
-                ScheduleResponseReply(id, response);
+                ScheduleResponseReply(id, replyPipe, response);
             }
             else
             {
@@ -250,13 +249,13 @@ public class PipeServer<TP> : PipeTransport
         }
     }
 
-    private void ScheduleResponseReply<TRep>(Guid id, PipeMessageResponse<TRep> response)
+    private void ScheduleResponseReply<TRep>(Guid id, Guid replyPipe, PipeMessageResponse<TRep> response)
     {
         Interlocked.Increment(ref _replyMessages);
         _logger.LogDebug("scheduling reply for message {MessageId}", id);
-        var responseMessage = new ResponseMessage(id, _sendPipe)
+        var responseMessage = new ResponseMessage(id, replyPipe.ToString())
         {
-            Action = (s, c) => SendResponse(id, response, s, c)
+            Action = (s, c) => SendResponse(id, replyPipe, response, s, c)
         };
 
         var pipeName = responseMessage.ReplyPipe;

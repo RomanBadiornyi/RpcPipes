@@ -14,14 +14,15 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.Deserialize<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<RequestMessage>(args => throw new InvalidOperationException("deserialize server error"));
         
+        var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var exception = Assert.ThrowsAsync<PipeServerException>(
@@ -40,14 +41,15 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.Deserialize<PipeMessageResponse<ReplyMessage>>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
+        var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "Client.TestPipe", "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", Guid.NewGuid(), 1, _progressMessageReceiver, serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var exception = Assert.ThrowsAsync<InvalidOperationException>(
