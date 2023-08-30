@@ -5,9 +5,9 @@ namespace RpcPipes;
 public class PipeProtocol
 {
     private readonly Stream _stream;
-    private readonly IPipeMessageSerializer _serializer;
+    private readonly IPipeMessageWriter _serializer;
 
-    public PipeProtocol(Stream stream, IPipeMessageSerializer serializer)
+    public PipeProtocol(Stream stream, IPipeMessageWriter serializer)
     {
         _stream = stream;
         _serializer = serializer;

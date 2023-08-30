@@ -34,7 +34,7 @@ public class PipeServer<TP> : PipeTransport
     private readonly string _receivePipe;
     private readonly string _progressPipe;
     private readonly IPipeProgressHandler<TP> _progressHandler;
-    private readonly IPipeMessageSerializer _serializer;
+    private readonly IPipeMessageWriter _serializer;
 
     private int _pendingMessages;
     private int _activeMessages;
@@ -52,7 +52,7 @@ public class PipeServer<TP> : PipeTransport
     private readonly ConcurrentDictionary<Guid, RequestMessage> _requestsQueue = new();
     private readonly ConcurrentDictionary<string, MessageChannel<ResponseMessage>> _responseChannels = new();
 
-    public PipeServer(ILogger<PipeServer<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageSerializer serializer) :
+    public PipeServer(ILogger<PipeServer<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageWriter serializer) :
         base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
@@ -148,8 +148,8 @@ public class PipeServer<TP> : PipeTransport
             catch (Exception e)
             {
                 _logger.LogWarning(e, "unable to consume message {MessageId} due to error, reply error back to client", requestMessage.Id);
-                var replyError = RequestException.CreateRequestException(e);
-                var response = new PipeMessageResponse<TRep> { Reply = default, ReplyError = replyError };
+                var response = _serializer.CreateResponseContainer<TRep>();
+                response.SetRequestException(e);
                 ScheduleResponseReply(requestMessage.Id, response);
             }
         }
@@ -185,26 +185,25 @@ public class PipeServer<TP> : PipeTransport
 
     private async Task RunRequest<TReq, TRep>(IPipeMessageHandler<TReq, TRep> messageHandler, Guid id, TReq request, CancellationToken token)
     {
-        TRep reply = default;
-        RequestException replyError = default;
+        var response = _serializer.CreateResponseContainer<TRep>();
         try
         {
             Interlocked.Increment(ref _activeMessages);
             _logger.LogDebug("handling request for message {MessageId}", id);
             token.ThrowIfCancellationRequested();
             _progressHandler.StartMessageExecute(id, request);
-            reply = await messageHandler.HandleRequest(request, token);
+            response.Reply = await messageHandler.HandleRequest(request, token);
             _logger.LogDebug("handled request for message {MessageId}, sending reply back to client", id);
         }
         catch (OperationCanceledException e)
         {
             _logger.LogWarning("request execution cancelled for message {MessageId}, notify client", id);
-            replyError = RequestException.CreateRequestException(e);
+            response.SetRequestException(e);
         }
         catch (Exception e)
         {
             _logger.LogError(e, "request handler for message {MessageId} thrown unhandled error, sending error back to client", id);
-            replyError = RequestException.CreateRequestException(e);
+            response.SetRequestException(e);
         }
         finally
         {
@@ -212,7 +211,6 @@ public class PipeServer<TP> : PipeTransport
             Interlocked.Decrement(ref _activeMessages);
             _progressHandler.EndMessageExecute(id);
         }
-        var response = new PipeMessageResponse<TRep> { Reply = reply, ReplyError = replyError };
         ScheduleResponseReply(id, response);
     }
 
@@ -239,8 +237,8 @@ public class PipeServer<TP> : PipeTransport
             if (response.Reply != null)
             {
                 _logger.LogError(e, "error occurred while sending reply for message {MessageId} to the client, sending error back to client", id);
-                var replyError = RequestException.CreateRequestException(e);
-                response = new PipeMessageResponse<TRep> { Reply = default, ReplyError = replyError };
+                response = _serializer.CreateResponseContainer<TRep>();
+                response.SetRequestException(e);
                 ScheduleResponseReply(id, response);
             }
             else

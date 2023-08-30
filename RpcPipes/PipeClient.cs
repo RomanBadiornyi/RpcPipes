@@ -36,7 +36,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
     private readonly ILogger<PipeClient<TP>> _logger;
 
     private readonly IPipeProgressReceiver<TP> _progressHandler;
-    private readonly IPipeMessageSerializer _serializer;
+    private readonly IPipeMessageWriter _serializer;
 
     private readonly Task _serverTask;
     private readonly CancellationTokenSource _serverTaskCancellation;
@@ -56,7 +56,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
 
     public TimeSpan ProgressFrequency = TimeSpan.FromSeconds(5);
 
-    public PipeClient(ILogger<PipeClient<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressReceiver<TP> progressHandler, IPipeMessageSerializer serializer) :
+    public PipeClient(ILogger<PipeClient<TP>> logger, string sendPipe, string receivePipe, string progressPipe, int instances, IPipeProgressReceiver<TP> progressHandler, IPipeMessageWriter serializer) :
         base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
@@ -115,7 +115,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
             ProgressCheckTime = DateTime.Now
         };
 
-        var responseMessage = default(PipeMessageResponse<TRep>);
+        var responseMessage = _serializer.CreateResponseContainer<TRep>();
         requestMessage.SendAction =
             (c, t) => SendRequest(requestMessage.Id, request, c, t);
         requestMessage.ReceiveAction =

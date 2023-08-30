@@ -24,7 +24,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             _clientLogger, "TestPipe", "Client.TestPipe", "Progress.TestPipe", 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
-            var exception = Assert.ThrowsAsync<ServiceException>(
+            var exception = Assert.ThrowsAsync<PipeServerException>(
                 () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None));
             Assert.That(exception.Message, Does.Contain("deserialize server error"));
         }

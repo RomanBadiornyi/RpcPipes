@@ -1,10 +1,5 @@
 namespace RpcPipes;
 
-public interface IPipeProgress
-{
-    double Progress { get; }
-}
-
 public class ProgressToken
 {
     public Guid Id { get; set; }
