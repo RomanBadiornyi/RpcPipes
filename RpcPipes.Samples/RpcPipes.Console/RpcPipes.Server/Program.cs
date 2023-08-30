@@ -5,6 +5,7 @@ using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeProgress;
+using RpcPipes.PipeServer;
 
 const string receivePipe = "TestPipe";
 const string progressPipe = "Progress.TestPipe";

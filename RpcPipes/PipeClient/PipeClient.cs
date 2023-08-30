@@ -2,37 +2,10 @@ using System.Collections.Concurrent;
 using System.IO.Pipes;
 using Microsoft.Extensions.Logging;
 
-namespace RpcPipes;
-
-public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
+namespace RpcPipes.PipeClient;
+public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposable
     where TP : IPipeProgress
 {
-    private class RequestMessage
-    {
-        public Guid Id { get;  }
-        public string RequestPipe { get; }
-        public string ProgressPipe { get; }
-
-        public SemaphoreSlim ReceiveHandle { get; set; }
-        public SemaphoreSlim ProgressCheckHandle { get; set; }
-        public DateTime ProgressCheckTime { get; set; }
-
-        public Func<NamedPipeClientStream, CancellationToken, Task> SendAction { get; set; }
-        public Func<NamedPipeServerStream, int, CancellationToken, Task> ReceiveAction { get; set; }
-
-        public CancellationTokenSource RequestCancellation { get; set; }
-
-        public int Retries { get; set; }
-        public Exception Exception { get; set; }
-
-        public RequestMessage(Guid id, string requestPipe, string progressPipe)
-        {
-            Id = id;
-            RequestPipe = requestPipe;
-            ProgressPipe = progressPipe;
-        }
-    }
-
     private readonly ILogger<PipeClient<TP>> _logger;
 
     private readonly IPipeProgressReceiver<TP> _progressHandler;
@@ -50,10 +23,10 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
     private int _sentMessages;
     private int _receivedMessages;
 
-    private readonly ConcurrentDictionary<Guid, RequestMessage> _requestQueue = new();
+    private readonly ConcurrentDictionary<Guid, PipeClientRequestHandle> _requestQueue = new();
 
-    private readonly ConcurrentDictionary<string, MessageChannel<RequestMessage>> _requestChannels = new();
-    private readonly ConcurrentDictionary<string, MessageChannel<RequestMessage>> _progressChannels = new();
+    private readonly ConcurrentDictionary<string, MessageChannel<PipeClientRequestHandle>> _requestChannels = new();
+    private readonly ConcurrentDictionary<string, MessageChannel<PipeClientRequestHandle>> _progressChannels = new();
 
     public TimeSpan ProgressFrequency = TimeSpan.FromSeconds(5);
 
@@ -116,7 +89,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
     {
         using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-        var requestMessage = new RequestMessage(Guid.NewGuid(), _sendPipe, _progressPipe)
+        var requestMessage = new PipeClientRequestHandle(Guid.NewGuid(), _sendPipe, _progressPipe)
         {
             RequestCancellation = requestCancellation,
             ReceiveHandle = new SemaphoreSlim(0),
@@ -164,7 +137,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
     }
 
     private async Task HandleSendMessage(
-        RequestMessage requestMessage, NamedPipeClientStream clientPipeStream, CancellationToken cancellation)
+        PipeClientRequestHandle requestMessage, NamedPipeClientStream clientPipeStream, CancellationToken cancellation)
     {
         using var sendCancellation = CancellationTokenSource
             .CreateLinkedTokenSource(cancellation, requestMessage.RequestCancellation.Token);
@@ -207,7 +180,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
     }
 
     private async Task HandleProgressMessage(
-        RequestMessage requestMessage, Stream progressPipeStream, CancellationToken cancellation)
+        PipeClientRequestHandle requestMessage, Stream progressPipeStream, CancellationToken cancellation)
     {
         var requestMessageActive = false;
         var lastCheckInterval = DateTime.Now - requestMessage.ProgressCheckTime;
@@ -232,7 +205,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
                 if (requestMessageActive)
                 {
                     var protocol = new PipeProtocol(progressPipeStream, _serializer);
-                    var progressToken = new ProgressToken { Id = requestMessage.Id, Active = !requestMessage.RequestCancellation.IsCancellationRequested };
+                    var progressToken = new PipeProgressToken { Id = requestMessage.Id, Active = !requestMessage.RequestCancellation.IsCancellationRequested };
                     await protocol.TransferMessage(requestMessage.Id, BufferSize, progressToken, cancellation);
                     var progress = await protocol.ReceiveMessage<TP>(cancellation);
                     if (progress != null)
@@ -275,7 +248,7 @@ public class PipeClient<TP> : PipeTransport, IDisposable, IAsyncDisposable
 
     private async Task HandleReceiveMessage(NamedPipeServerStream serverPipeStream, CancellationToken cancellation)
     {
-        RequestMessage requestMessage = null;
+        PipeClientRequestHandle requestMessage = null;
         var protocol = new PipeProtocol(serverPipeStream, _serializer);
         var (messageId, bufferSize) = await protocol
             .BeginReceiveMessage(id => {

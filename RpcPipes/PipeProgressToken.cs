@@ -1,6 +1,6 @@
 namespace RpcPipes;
 
-public class ProgressToken
+public class PipeProgressToken
 {
     public Guid Id { get; set; }
     public bool Active { get; set; }

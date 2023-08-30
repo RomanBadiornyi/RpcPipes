@@ -2,6 +2,8 @@ using NSubstitute;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeSerializers;
+using RpcPipes.PipeClient;
+using RpcPipes.PipeServer;
 
 namespace RpcPipes.PipeClientServer.Tests;
 

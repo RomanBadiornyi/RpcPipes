@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes;
 
-public class PipeTransport
+public class PipeConnectionManager
 {
     protected class MessageChannel<T>
     {
@@ -27,102 +27,13 @@ public class PipeTransport
 
     public TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
 
-    public PipeTransport(ILogger logger, int instances, int bufferSize, PipeOptions options)
+    public PipeConnectionManager(ILogger logger, int instances, int bufferSize, PipeOptions options)
     {
         _logger = logger;
 
         Instances = instances;
         BufferSize = bufferSize;
         Options = options;
-    }
-
-    private async Task<bool> WaitForClientConnection(NamedPipeServerStream server, string pipeName, CancellationToken token)
-    {
-        try
-        {
-            await server.WaitForConnectionAsync(token);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogDebug("connection to {Type} stream pipe {Pipe} closed", "server", pipeName);
-            return false;
-        }
-        catch (IOException)
-        {
-            _logger.LogDebug("connection to {Type} stream pipe {Pipe} got interrupted", "server", pipeName);
-            return false;
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "connection to {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
-            return false;
-        }
-    }
-
-    private async Task<bool> TryConnectToServer(NamedPipeClientStream client, string pipeName, TimeSpan timeout, CancellationToken token)
-    {
-        using var connectionCancellation = new CancellationTokenSource();
-        connectionCancellation.CancelAfter(timeout);
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellation.Token, token);
-        try
-        {
-            await client.ConnectAsync(Timeout.Infinite, cancellation.Token);
-            return true;
-        }
-        catch (OperationCanceledException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            _logger.LogDebug("connection to {Type} stream pipe {Pipe} got interrupted", "client", pipeName);
-            return false;
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "connection to {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
-            return false;
-        }
-    }
-
-    private void DisconnectServer(NamedPipeServerStream server, string pipeName)
-    {
-        try
-        {
-            try
-            {
-                if (server.IsConnected)
-                    server.Disconnect();
-            }
-            finally
-            {
-                server.Dispose();
-            }
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
-        }
-    }
-
-    private void DisconnectClient(NamedPipeClientStream client, string pipeName)
-    {
-        try
-        {
-            try
-            {
-                client.Close();
-            }
-            finally
-            {
-                client.Dispose();
-            }
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
-        }
     }
 
     protected Task StartServerListener(int count, Func<Task> taskAction)
@@ -305,6 +216,95 @@ public class PipeTransport
                 if (isConnected)
                     OnClientDisconnect?.Invoke();
             }
+        }
+    }
+
+    private async Task<bool> WaitForClientConnection(NamedPipeServerStream server, string pipeName, CancellationToken token)
+    {
+        try
+        {
+            await server.WaitForConnectionAsync(token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("connection to {Type} stream pipe {Pipe} closed", "server", pipeName);
+            return false;
+        }
+        catch (IOException)
+        {
+            _logger.LogDebug("connection to {Type} stream pipe {Pipe} got interrupted", "server", pipeName);
+            return false;
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "connection to {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
+            return false;
+        }
+    }
+
+    private async Task<bool> TryConnectToServer(NamedPipeClientStream client, string pipeName, TimeSpan timeout, CancellationToken token)
+    {
+        using var connectionCancellation = new CancellationTokenSource();
+        connectionCancellation.CancelAfter(timeout);
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellation.Token, token);
+        try
+        {
+            await client.ConnectAsync(Timeout.Infinite, cancellation.Token);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            _logger.LogDebug("connection to {Type} stream pipe {Pipe} got interrupted", "client", pipeName);
+            return false;
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "connection to {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
+            return false;
+        }
+    }
+
+    private void DisconnectServer(NamedPipeServerStream server, string pipeName)
+    {
+        try
+        {
+            try
+            {
+                if (server.IsConnected)
+                    server.Disconnect();
+            }
+            finally
+            {
+                server.Dispose();
+            }
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
+        }
+    }
+
+    private void DisconnectClient(NamedPipeClientStream client, string pipeName)
+    {
+        try
+        {
+            try
+            {
+                client.Close();
+            }
+            finally
+            {
+                client.Dispose();
+            }
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
         }
     }
 }

@@ -1,33 +1,12 @@
 using System.Collections.Concurrent;
 using System.IO.Pipes;
-using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
-namespace RpcPipes;
+namespace RpcPipes.PipeServer;
 
-public class PipeServer<TP> : PipeTransport
+public class PipeServer<TP> : PipeConnectionManager
     where TP: IPipeProgress
-{
-    private class RequestMessage
-    {
-        public Guid Id { get; set; }
-        public CancellationTokenSource Cancellation { get; set; }
-        public Func<Guid, CancellationTokenSource, Task> ExecuteAction { get; set; }
-    }
-
-    private class ResponseMessage
-    {
-        public Guid Id { get; }
-        public string ReplyPipe { get; }
-        public Func<NamedPipeClientStream, CancellationToken, Task> Action { get; set; }
-
-        public ResponseMessage(Guid id, string replyPipe)
-        {
-            Id = id;;
-            ReplyPipe = replyPipe;
-        }
-    }
-
+{    
     private readonly ILogger<PipeServer<TP>> _logger;
 
     private readonly string _receivePipe;
@@ -48,8 +27,8 @@ public class PipeServer<TP> : PipeTransport
     private Task _serverTask;
     private CancellationTokenSource _serverTaskCancellation;
 
-    private readonly ConcurrentDictionary<Guid, RequestMessage> _requestsQueue = new();
-    private readonly ConcurrentDictionary<string, MessageChannel<ResponseMessage>> _responseChannels = new();
+    private readonly ConcurrentDictionary<Guid, PipeServerRequestHandle> _requestsQueue = new();
+    private readonly ConcurrentDictionary<string, MessageChannel<PipeServerResponseHandle>> _responseChannels = new();
 
     public PipeServer(ILogger<PipeServer<TP>> logger, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageWriter serializer) :
         base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
@@ -115,14 +94,14 @@ public class PipeServer<TP> : PipeTransport
     private async Task HandleReceiveMessage<TReq, TRep>(IPipeMessageHandler<TReq, TRep> messageHandler, Stream stream, CancellationToken cancellation)
     {
         var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        RequestMessage requestMessage = null;
+        PipeServerRequestHandle requestMessage = null;
 
         var protocol = new PipeProtocol(stream, _serializer);
         var (messageId, replyPipe, bufferSize) = await protocol
             .BeginReceiveMessageAsync(id => {
                 //ensure we add current request to outstanding messages before we complete reading request payload
                 //this way we ensure that when client starts checking progress - we already can reply as we know about this message
-                requestMessage = new RequestMessage { Id = id };
+                requestMessage = new PipeServerRequestHandle { Id = id };
                 if (!_requestsQueue.TryAdd(id, requestMessage))
                     requestMessage = null;
                 else
@@ -156,7 +135,7 @@ public class PipeServer<TP> : PipeTransport
     private async Task HandleProgressMessage(Stream stream, CancellationToken cancellation)
     {
         var protocol = new PipeProtocol(stream, _serializer);
-        var progressToken = await protocol.ReceiveMessage<ProgressToken>(cancellation);
+        var progressToken = await protocol.ReceiveMessage<PipeProgressToken>(cancellation);
         if (progressToken != null && !cancellation.IsCancellationRequested)
         {
             var progress = default(TP);
@@ -253,7 +232,7 @@ public class PipeServer<TP> : PipeTransport
     {
         Interlocked.Increment(ref _replyMessages);
         _logger.LogDebug("scheduling reply for message {MessageId}", id);
-        var responseMessage = new ResponseMessage(id, replyPipe.ToString())
+        var responseMessage = new PipeServerResponseHandle(id, replyPipe.ToString())
         {
             Action = (s, c) => SendResponse(id, replyPipe, response, s, c)
         };
@@ -268,7 +247,7 @@ public class PipeServer<TP> : PipeTransport
 
     private void ExecuteRequest(object state)
     {
-        var requestMessage = (RequestMessage)state;
+        var requestMessage = (PipeServerRequestHandle)state;
         _ = ExecuteAsync(_serverTaskCancellation.Token);
         Interlocked.Decrement(ref _pendingMessages);
 
