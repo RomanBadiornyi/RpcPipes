@@ -106,11 +106,11 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.GetProgress(Arg.Any<object>())
             .Returns(args => new ProgressMessage(0.5, ""));        
         var serializer = Substitute.ForPartsOf<PipeSerializer>();        
-        serializer.Deserialize<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())            
-            .Returns(args => _serializer.Deserialize<RequestMessage>((Stream)args[0], (CancellationToken)args[1]))
+        serializer.ReadRequest<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())            
+            .Returns(args => _serializer.ReadRequest<RequestMessage>((Stream)args[0], (CancellationToken)args[1]))
             .AndDoes(x => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
-        serializer.Serialize(Arg.Any<PipeMessageResponse<ReplyMessage>>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>())
-            .Returns(args => _serializer.Serialize((PipeMessageResponse<ReplyMessage>)args[0], (Stream)args[1], (CancellationToken)args[2]))
+        serializer.WriteResponse(Arg.Any<PipeMessageResponse<ReplyMessage>>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(args => _serializer.WriteResponse((PipeMessageResponse<ReplyMessage>)args[0], (Stream)args[1], (CancellationToken)args[2]))
             .AndDoes(x => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
 
         var clientId = Guid.NewGuid();

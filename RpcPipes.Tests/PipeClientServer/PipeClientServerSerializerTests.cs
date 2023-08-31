@@ -13,8 +13,8 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
     public async Task RequestReply_WhenServerDeserializeThrows_ErrorReturned()
     {        
         var serializer = Substitute.ForPartsOf<PipeSerializer>();        
-        serializer.Deserialize<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
-            .Returns<RequestMessage>(args => throw new InvalidOperationException("deserialize server error"));
+        serializer.ReadRequest<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns<PipeMessageRequest<RequestMessage>>(args => throw new InvalidOperationException("deserialize server error"));
         
         var clientId = Guid.NewGuid();
         var pipeServer = new PipeServer<ProgressMessage>(
@@ -40,7 +40,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
     public async Task RequestReply_WhenClientDeserializeThrows_ErrorReturned()
     {        
         var serializer = Substitute.ForPartsOf<PipeSerializer>();        
-        serializer.Deserialize<PipeMessageResponse<ReplyMessage>>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+        serializer.ReadResponse<ReplyMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
         var clientId = Guid.NewGuid();

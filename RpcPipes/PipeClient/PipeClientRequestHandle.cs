@@ -11,6 +11,7 @@ internal class PipeClientRequestHandle
     public SemaphoreSlim ReceiveHandle { get; set; }
     public SemaphoreSlim ProgressCheckHandle { get; set; }
     public DateTime ProgressCheckTime { get; set; }
+    public TimeSpan ProgressCheckFrequency { get; set; }
 
     public Func<NamedPipeClientStream, CancellationToken, Task> SendAction { get; set; }
     public Func<NamedPipeServerStream, int, CancellationToken, Task> ReceiveAction { get; set; }

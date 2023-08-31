@@ -9,7 +9,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     private readonly ILogger<PipeClient<TP>> _logger;
 
     private readonly IPipeProgressReceiver<TP> _progressHandler;
-    private readonly IPipeMessageWriter _serializer;
+    private readonly IPipeMessageWriter _messageWriter;
 
     private readonly Task _serverTask;
     private readonly CancellationTokenSource _serverTaskCancellation;
@@ -29,6 +29,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     private readonly ConcurrentDictionary<string, MessageChannel<PipeClientRequestHandle>> _progressChannels = new();
 
     public TimeSpan ProgressFrequency = TimeSpan.FromSeconds(5);
+    public TimeSpan Deadline = TimeSpan.FromHours(1);
 
     public PipeClient(
         ILogger<PipeClient<TP>> logger, 
@@ -37,13 +38,13 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
         Guid receivePipe,
         int instances, 
         IPipeProgressReceiver<TP> progressHandler, 
-        IPipeMessageWriter serializer) :
+        IPipeMessageWriter messageWriter) :
             base(logger, instances, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
 
         _progressHandler = progressHandler;
-        _serializer = serializer;
+        _messageWriter = messageWriter;
 
         _sendPipe = sendPipe;
         _progressPipe = progressPipe;
@@ -94,14 +95,21 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             RequestCancellation = requestCancellation,
             ReceiveHandle = new SemaphoreSlim(0),
             ProgressCheckHandle = new SemaphoreSlim(1),
-            ProgressCheckTime = DateTime.Now
+            ProgressCheckTime = DateTime.Now,
+            ProgressCheckFrequency = ProgressFrequency            
         };
 
-        var responseMessage = _serializer.CreateResponseContainer<TRep>();
+        var pipeRequest = new PipeMessageRequest<TReq>();
+        var pipeResponse = new PipeMessageResponse<TRep>();
+
+        pipeRequest.Request = request;
+        pipeRequest.ProgressFrequency = ProgressFrequency;
+        pipeRequest.Deadline = Deadline;        
+
         requestMessage.SendAction =
-            (c, t) => SendRequest(requestMessage.Id, request, c, t);
+            (c, t) => SendRequest(requestMessage.Id, pipeRequest, c, t);
         requestMessage.ReceiveAction =
-            async (s, bs, t) => { responseMessage = await ReadReply<PipeMessageResponse<TRep>>(requestMessage.Id, s, bs, t); };
+            async (s, bs, t) => { pipeResponse = await ReadReply<TRep>(requestMessage.Id, s, bs, t); };
 
         if (_requestQueue.TryAdd(requestMessage.Id, requestMessage))
         {
@@ -130,10 +138,10 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
 
         if (requestMessage.Exception != null)
             throw requestMessage.Exception;
-        var responseError = responseMessage?.ReplyError;
+        var responseError = pipeResponse?.ReplyError;
         if (responseError != null)
             throw responseError.ToException();
-        return responseMessage.Reply;
+        return pipeResponse.Reply;
     }
 
     private async Task HandleSendMessage(
@@ -184,9 +192,9 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     {
         var requestMessageActive = false;
         var lastCheckInterval = DateTime.Now - requestMessage.ProgressCheckTime;
-        if (lastCheckInterval < ProgressFrequency)
+        if (lastCheckInterval < requestMessage.ProgressCheckFrequency)
         {
-            await Task.Delay(ProgressFrequency - lastCheckInterval, cancellation);
+            await Task.Delay(requestMessage.ProgressCheckFrequency - lastCheckInterval, cancellation);
             ProcessClientMessage(
                 _progressChannels,
                 requestMessage.ProgressPipe,
@@ -204,10 +212,20 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
                 requestMessageActive = _requestQueue.ContainsKey(requestMessage.Id);
                 if (requestMessageActive)
                 {
-                    var protocol = new PipeProtocol(progressPipeStream, _serializer);
-                    var progressToken = new PipeProgressToken { Id = requestMessage.Id, Active = !requestMessage.RequestCancellation.IsCancellationRequested };
-                    await protocol.TransferMessage(requestMessage.Id, BufferSize, progressToken, cancellation);
-                    var progress = await protocol.ReceiveMessage<TP>(cancellation);
+                    var protocol = new PipeProtocol(progressPipeStream);
+                    var progressToken = new PipeProgressToken 
+                    { 
+                        Id = requestMessage.Id, 
+                        Active = !requestMessage.RequestCancellation.IsCancellationRequested 
+                    };
+                    await protocol.TransferMessage(
+                        requestMessage.Id, 
+                        (s, c) => _messageWriter.WriteData(progressToken, s, c), 
+                        BufferSize, 
+                        cancellation);
+                    var progress = await protocol.ReceiveMessage(
+                        (s, c) => _messageWriter.ReadData<TP>(s, c), 
+                        cancellation);
                     if (progress != null)
                     {
                         if (progress.Progress > 0)
@@ -249,7 +267,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     private async Task HandleReceiveMessage(NamedPipeServerStream serverPipeStream, CancellationToken cancellation)
     {
         PipeClientRequestHandle requestMessage = null;
-        var protocol = new PipeProtocol(serverPipeStream, _serializer);
+        var protocol = new PipeProtocol(serverPipeStream);
         var (messageId, bufferSize) = await protocol
             .BeginReceiveMessage(id => {
                 //ensure we stop progress task as soon as we started receiving reply
@@ -285,14 +303,15 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
         }
     }
 
-    private async Task SendRequest<TReq>(Guid id, TReq request, Stream client, CancellationToken token)
+    private async Task SendRequest<TReq>(Guid id, PipeMessageRequest<TReq> request, Stream client, CancellationToken token)
     {
         try
         {
             _logger.LogDebug("sending request message {MessageId} to server", id);
-            var protocol = new PipeProtocol(client, _serializer);
+            var protocol = new PipeProtocol(client);
+            
             await protocol.BeginTransferMessageAsync(id, BufferSize, _receivePipe, token);
-            await protocol.EndTransferMessage(id, request, BufferSize, token);
+            await protocol.EndTransferMessage(id, Write, BufferSize, token);
             _logger.LogDebug("sent request message {MessageId} to server", id);
         }
         catch (Exception e)
@@ -300,15 +319,18 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             _logger.LogError(e, "unhandled error occurred while sending request message {MessageId} to server", id);
             throw;
         }
+
+        Task Write(Stream stream, CancellationToken cancellation)
+            => _messageWriter.WriteRequest(request, stream, cancellation);
     }
 
-    private async Task<TRep> ReadReply<TRep>(Guid id, Stream server, int bufferSize, CancellationToken token)
+    private async Task<PipeMessageResponse<TRep>> ReadReply<TRep>(Guid id, Stream server, int bufferSize, CancellationToken token)
     {
         try
         {
             _logger.LogDebug("receiving reply for message {MessageId} from server", id);
-            var protocol = new PipeProtocol(server, _serializer);
-            var response = await protocol.EndReceiveMessage<TRep>(id, bufferSize, token);
+            var protocol = new PipeProtocol(server);
+            var response = await protocol.EndReceiveMessage(id, Read, bufferSize, token);
             _logger.LogDebug("received reply for message {MessageId} from server", id);
             return response;
         }
@@ -317,6 +339,10 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             _logger.LogError(e, "unhandled error occurred while receiving reply for message {MessageId} from server", id);
             throw;
         }
+
+        ValueTask<PipeMessageResponse<TRep>> Read(Stream stream, CancellationToken cancellation)
+            => _messageWriter.ReadResponse<TRep>(stream, cancellation);
+        
     }
 
     public void Dispose()

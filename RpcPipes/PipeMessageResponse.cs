@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace RpcPipes;
 
 public class PipeMessageResponse<T>

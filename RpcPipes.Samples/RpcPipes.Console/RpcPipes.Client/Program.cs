@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using RpcPipes;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeProgress;
@@ -12,7 +11,7 @@ const string sendPipe = "TestPipe";
 const string progressPipe = "Progress.TestPipe";
 
 const int connections = 32;
-const int tasks = 8196;
+const int tasks = 128 * 256;
 const int delay = 15;
 const int progress = 3;
 const int timeoutMinutes = 3;
@@ -78,6 +77,7 @@ await using (var pipeClient = new PipeClient<ProgressMessage>(
     }
     
     await serviceProvider.DisposeAsync();
+    await Task.Delay(TimeSpan.FromSeconds(10));
 
     async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i)
     {
