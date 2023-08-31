@@ -1,5 +1,3 @@
-using System.IO.Pipes;
-
 namespace RpcPipes.PipeClient;
 
 internal class PipeClientRequestHandle
@@ -13,8 +11,8 @@ internal class PipeClientRequestHandle
     public DateTime ProgressCheckTime { get; set; }
     public TimeSpan ProgressCheckFrequency { get; set; }
 
-    public Func<NamedPipeClientStream, CancellationToken, Task> SendAction { get; set; }
-    public Func<NamedPipeServerStream, int, CancellationToken, Task> ReceiveAction { get; set; }
+    public Func<PipeProtocol, CancellationToken, Task> SendAction { get; set; }
+    public Func<PipeProtocol, CancellationToken, Task> ReceiveAction { get; set; }
 
     public CancellationTokenSource RequestCancellation { get; set; }
 

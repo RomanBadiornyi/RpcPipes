@@ -8,9 +8,8 @@ using RpcPipes.Models.PipeSerializers;
 using RpcPipes.PipeClient;
 using RpcPipes.PipeServer;
 
-namespace RpcPipes.PipeClientServer.Tests;
+namespace RpcPipes.Tests.PipeClientServer;
 
-[TestFixture]
 public class BasePipeClientServerTests
 {
     protected ILogger<PipeServer<ProgressMessage>> _serverLogger;

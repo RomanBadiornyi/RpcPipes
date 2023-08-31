@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
-using RpcPipes;
+
+namespace RpcPipes;
 
 public abstract class PipeProgressHandler<TOut> : IPipeProgressHandler<TOut>
     where TOut : IPipeProgress

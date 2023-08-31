@@ -11,7 +11,7 @@ const string sendPipe = "TestPipe";
 const string progressPipe = "Progress.TestPipe";
 
 const int connections = 32;
-const int tasks = 128 * 256;
+const int tasks = 8196 * 4;
 const int delay = 15;
 const int progress = 3;
 const int timeoutMinutes = 3;
@@ -36,27 +36,27 @@ var progressReplies = new ConcurrentBag<ProgressMessage>();
 var progressMessageReceiver = new PipeProgressReceiver(progressReplies);
 
 await using (var pipeClient = new PipeClient<ProgressMessage>(
-    logger, sendPipe, progressPipe, Guid.NewGuid(), connections, progressMessageReceiver, serializer)
+    logger, sendPipe, progressPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, progressMessageReceiver, serializer)
     {
         ProgressFrequency = TimeSpan.FromSeconds(progress)
     }) 
 {
+    var c = pipeClient;
     Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
         e.Cancel = true;    
-        pipeClient.Dispose();
+        c.Dispose();
     };
 
     logger.LogInformation("Starting client, press Ctrl+C to interrupt");
 
     var stopwatch = new Stopwatch();
-    IEnumerable<Task<(ReplyMessage Reply, Exception Error)>> requests = null;
-    (ReplyMessage Reply, Exception Error)[] replies = null;
-    (ReplyMessage Reply, Exception Error)[] errors = null;
+    var replies = Array.Empty<(ReplyMessage Reply, Exception Error)>();
+    var errors = Array.Empty<(ReplyMessage Reply, Exception Error)>();
     try
     {
         stopwatch.Start();
-        requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i));
-        replies = await Task.WhenAll(requests.ToArray());
+        var requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i, pipeClient)).ToArray();
+        replies = await Task.WhenAll(requests);
         errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();
         stopwatch.Stop();        
     }
@@ -70,23 +70,25 @@ await using (var pipeClient = new PipeClient<ProgressMessage>(
         logger.LogInformation("Replies {Count}", replies.Length);
         logger.LogInformation("Errors {Count}", errors.Length);
         logger.LogInformation("Completed in {Time}", stopwatch.Elapsed);
+
+        Console.WriteLine("Progress updated {0}", progressReplies.Count);
+        Console.WriteLine("Replies {0}", replies.Length);
+        Console.WriteLine("Errors {0}", errors.Length);
+        Console.WriteLine("Completed in {0}", stopwatch.Elapsed);
         foreach (var e in errors)
         {
             logger.LogError(e.Error.ToString());
         }        
     }
     
-    await serviceProvider.DisposeAsync();
-    await Task.Delay(TimeSpan.FromSeconds(10));
-
-    async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i)
+    async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i, PipeClient<ProgressMessage> c)
     {
         var request = new RequestMessage($"Sample request {i}", delay);
         var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
         try
         {
-            return (await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, cts.Token), null);
+            return (await c.SendRequest<RequestMessage, ReplyMessage>(request, cts.Token), null);
         }
         catch (Exception e)
         {
@@ -94,3 +96,7 @@ await using (var pipeClient = new PipeClient<ProgressMessage>(
         }
     }    
 }
+
+await serviceProvider.DisposeAsync();
+Console.WriteLine("Exit in 10 seconds");
+await Task.Delay(TimeSpan.FromSeconds(10));

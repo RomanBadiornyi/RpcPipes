@@ -1,7 +1,12 @@
+using System.Text;
+
 namespace RpcPipes;
 
-public class PipeChunkReadStream : Stream
+public class PipeChunkReadStream : Stream, IAsyncDisposable
 {
+    private const int _bufferReserved = sizeof(int) + 1;
+    private bool _closed;
+
     private readonly byte[] _buffer;
     private readonly int _bufferLength;
 
@@ -9,8 +14,9 @@ public class PipeChunkReadStream : Stream
     private int _bufferPosition;
 
     private readonly Stream _networkStream;
+    private readonly CancellationToken _cancellationToken;
 
-    public PipeChunkReadStream(byte[] buffer, int bufferLength, Stream networkStream)
+    public PipeChunkReadStream(byte[] buffer, int bufferLength, Stream networkStream, CancellationToken cancellationToken)
     {
         if (buffer.Length > 0)
             buffer[0] = 0;
@@ -18,67 +24,97 @@ public class PipeChunkReadStream : Stream
         _buffer = buffer;
         _bufferLength = bufferLength;
         _bufferLengthCurrent = bufferLength;
-        _bufferPosition = 1;
+        _bufferPosition = _bufferReserved;
 
         _networkStream = networkStream;
+        _cancellationToken = cancellationToken;
+    }
+
+    public async Task<bool> TryReadGuid(Action<Guid> onRead, CancellationToken token)
+    {
+        var buffer = new byte[16];
+        var readCount = await ReadAsync(buffer, 0, buffer.Length, token);
+        if (readCount != buffer.Length)
+            return false;
+        onRead.Invoke(new Guid(buffer));
+        return true;
+    }
+
+    public async Task<bool> TryReadBoolean(Action<bool> onRead, CancellationToken token)
+    {
+        var buffer = new byte[1];
+        var readCount = await ReadAsync(buffer, 0, 1, token);
+        if (readCount != buffer.Length)
+            return false;
+        onRead.Invoke(BitConverter.ToBoolean(buffer, 0));
+        return true;
+    }
+
+    public async Task<bool> TryReadString(Action<string> onRead, CancellationToken token)
+    {
+        var buffer = new byte[4];
+        var readCount = await ReadAsync(buffer, 0, 4, token);
+        if (readCount < 4)
+            return false;
+        var stringLength = BitConverter.ToInt32(buffer, 0);
+        var stringBuffer = new byte[stringLength];
+        readCount = await ReadAsync(stringBuffer, 0, stringBuffer.Length, token);
+        if (readCount != stringBuffer.Length)
+            return false;
+        onRead.Invoke(Encoding.UTF8.GetString(stringBuffer));
+        return true;
     }
 
     public override int Read(byte[] buffer, int offset, int count)
     {
         var bufferReadTotal = 0L;
         var bufferClientPosition = offset;
-        var bufferReadCompleted = false;
 
-        while (bufferReadTotal < count && !bufferReadCompleted)
+        while (bufferReadTotal < count && (_bufferLengthCurrent - _bufferPosition > 0 || !_closed))
         {
-            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == 1)
+            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == _bufferReserved)
                 FillBuffer();
 
             var bufferReadCount = Math.Min(count - bufferClientPosition, _bufferLengthCurrent - _bufferPosition);
-            if (bufferReadCount > 0) 
+            if (bufferReadCount > 0)
                 Array.Copy(_buffer, _bufferPosition, buffer, bufferClientPosition, bufferReadCount);
-            
+
             _bufferPosition += bufferReadCount;
             bufferClientPosition += bufferReadCount;
             bufferReadTotal += bufferReadCount;
-
-            bufferReadCompleted = _buffer[0] == 1;
         }
         return (int)bufferReadTotal;
     }
 
-    public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) 
+    public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
         var bufferReadTotal = 0L;
         var bufferClientPosition = offset;
-        var bufferReadCompleted = false;
 
-        while (bufferReadTotal < count && !bufferReadCompleted)
+        while (bufferReadTotal < count && (_bufferLengthCurrent - _bufferPosition > 0 || !_closed))
         {
-            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == 1)
+            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == _bufferReserved)
                 await FillBufferAsync(cancellationToken);
 
             var bufferReadCount = Math.Min(count - bufferClientPosition, _bufferLengthCurrent - _bufferPosition);
-            if (bufferReadCount > 0) 
+            if (bufferReadCount > 0)
                 Array.Copy(_buffer, _bufferPosition, buffer, bufferClientPosition, bufferReadCount);
-            
+
             _bufferPosition += bufferReadCount;
             bufferClientPosition += bufferReadCount;
             bufferReadTotal += bufferReadCount;
-
-            bufferReadCompleted = _buffer[0] == 1;
         }
         return (int)bufferReadTotal;
     }
 
     public override void Flush()
-    {        
+    {
     }
 
     public override void Write(byte[] buffer, int offset, int count)
     {
         throw new NotSupportedException("Write operation is not supported");
-    } 
+    }
 
     public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
@@ -94,17 +130,57 @@ public class PipeChunkReadStream : Stream
     {
         throw new NotSupportedException("SetLength operation is not supported");
     }
-    
-    private void FillBuffer()
+
+    public async ValueTask DisposeAsync()
     {
-        _bufferLengthCurrent = _buffer[0] == 1 ? 1 : _networkStream.Read(_buffer, 0, _bufferLength);
-        _bufferPosition = 1;
+        while (!_closed)
+            await FillBufferAsync(_cancellationToken);
     }
 
-    public async Task FillBufferAsync(CancellationToken cancellationToken)
+    protected override void Dispose(bool disposing)
     {
-        _bufferLengthCurrent = _buffer[0] == 1 ? 1 : await _networkStream.ReadAsync(_buffer, 0, _bufferLength, cancellationToken);
-        _bufferPosition = 1;
+        while (!_closed)
+            FillBuffer();
+    }
+
+    private void FillBuffer()
+    {
+        if (_closed)
+            return;
+        _bufferPosition = _bufferReserved;
+        _bufferLengthCurrent = _bufferReserved;
+        var readCount = _networkStream.Read(_buffer, 0, _bufferReserved);
+        if (readCount != _bufferReserved)
+            _closed = true;
+        if (_closed)
+            return;
+        _closed = _buffer[0] == 1;
+        var readLength = BitConverter.ToInt32(_buffer, 1);
+
+        readCount = _networkStream.Read(_buffer, _bufferReserved, readLength);
+        _bufferLengthCurrent += readCount;
+        if (readCount != readLength)
+            _closed = true;
+    }
+
+    private async Task FillBufferAsync(CancellationToken cancellationToken)
+    {
+        if (_closed)
+            return;
+        _bufferPosition = _bufferReserved;
+        _bufferLengthCurrent = _bufferReserved;
+        var readCount = await _networkStream.ReadAsync(_buffer, 0, _bufferReserved, cancellationToken);
+        if (readCount != _bufferReserved)
+            _closed = true;
+        if (_closed)
+            return;
+        _closed = _buffer[0] == 1;
+        var readLength = BitConverter.ToInt32(_buffer, 1);
+
+        readCount = await _networkStream.ReadAsync(_buffer, _bufferReserved, readLength, cancellationToken);
+        _bufferLengthCurrent += readCount;
+        if (readCount != readLength)
+            _closed = true;
     }
 
     public override bool CanRead => true;

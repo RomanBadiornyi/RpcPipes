@@ -2,9 +2,9 @@ namespace RpcPipes.Tests;
 
 public class PipeChunkStreamTests
 {
-    [TestCase(16 + 1, 16, 16, 16)]
-    [TestCase(16 + 1, 12, 60, 60)]
-    [TestCase(16 + 1, 12, 14, 60)]
+    [TestCase(16 + 5, 16, 16, 16)]
+    [TestCase(16 + 5, 12, 60, 60)]
+    [TestCase(16 + 5, 12, 14, 60)]
     public async Task WriteAndReadMultipleTimesContentLessThanBufferAsync_ReadExpected(int bufferLength, int chunkWriteLength, int chunkReadLength, int dataLength)
     {
         var dataInputBuffer = new byte[dataLength];
@@ -14,10 +14,10 @@ public class PipeChunkStreamTests
         var memoryStream = new MemoryStream();
 
         var inputBuffer = new byte[bufferLength];
-        var input = new PipeChunkWriteStream(inputBuffer, inputBuffer.Length, memoryStream);
+        var input = new PipeChunkWriteStream(inputBuffer, inputBuffer.Length, memoryStream, CancellationToken.None);
 
         var outputBuffer = new byte[bufferLength];
-        var output = new PipeChunkReadStream(outputBuffer, outputBuffer.Length, memoryStream);
+        var output = new PipeChunkReadStream(outputBuffer, outputBuffer.Length, memoryStream, CancellationToken.None);
 
         var writeLength = 0;
         while (writeLength < dataLength)
@@ -48,9 +48,9 @@ public class PipeChunkStreamTests
         Assert.That(dataInputBuffer, Is.EquivalentTo(dataOutputBuffer));
     }
 
-    [TestCase(16 + 1, 16, 16, 16)]
-    [TestCase(16 + 1, 12, 60, 60)]
-    [TestCase(16 + 1, 12, 14, 60)]
+    [TestCase(16 + 5, 16, 16, 16)]
+    [TestCase(16 + 5, 12, 60, 60)]
+    [TestCase(16 + 5, 12, 14, 60)]
     public void WriteAndReadMultipleTimesContentLessThanBufferSync_ReadExpected(int bufferLength, int chunkWriteLength, int chunkReadLength, int dataLength)
     {
         var dataInputBuffer = new byte[dataLength];
@@ -60,10 +60,10 @@ public class PipeChunkStreamTests
         var memoryStream = new MemoryStream();
 
         var inputBuffer = new byte[bufferLength];
-        var input = new PipeChunkWriteStream(inputBuffer, inputBuffer.Length, memoryStream);
+        var input = new PipeChunkWriteStream(inputBuffer, inputBuffer.Length, memoryStream, CancellationToken.None);
 
         var outputBuffer = new byte[bufferLength];
-        var output = new PipeChunkReadStream(outputBuffer, outputBuffer.Length, memoryStream);
+        var output = new PipeChunkReadStream(outputBuffer, outputBuffer.Length, memoryStream, CancellationToken.None);
 
         var writeLength = 0;
         while (writeLength < dataLength)

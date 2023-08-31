@@ -4,7 +4,7 @@ using RpcPipes.Models.PipeSerializers;
 using RpcPipes.PipeClient;
 using RpcPipes.PipeServer;
 
-namespace RpcPipes.PipeClientServer.Tests;
+namespace RpcPipes.Tests.PipeClientServer;
 
 [TestFixture]
 public class PipeClientServerSerializerTests : BasePipeClientServerTests
@@ -16,7 +16,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.ReadRequest<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageRequest<RequestMessage>>(args => throw new InvalidOperationException("deserialize server error"));
         
-        var clientId = Guid.NewGuid();
+        var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeServer<ProgressMessage>(
             _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
 
@@ -43,7 +43,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.ReadResponse<ReplyMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
-        var clientId = Guid.NewGuid();
+        var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeServer<ProgressMessage>(
             _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
 
@@ -51,7 +51,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", Guid.NewGuid(), 1, _progressMessageReceiver, serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var exception = Assert.ThrowsAsync<InvalidOperationException>(

@@ -7,7 +7,7 @@ namespace RpcPipes;
 
 public class PipeConnectionManager
 {
-    protected class MessageChannel<T>
+    protected class PipeMessageChannel<T>
     {
         public Channel<T> Channel;
         public Task ChannelTask;
@@ -18,6 +18,8 @@ public class PipeConnectionManager
 
     protected readonly PipeOptions Options;
     protected readonly int Instances;
+
+    protected readonly int HeaderBufferSize;
     protected readonly int BufferSize;
 
     protected Action OnClientConnect;
@@ -27,12 +29,15 @@ public class PipeConnectionManager
 
     public TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
 
-    public PipeConnectionManager(ILogger logger, int instances, int bufferSize, PipeOptions options)
+    public PipeConnectionManager(ILogger logger, int instances, int headerBufferSize, int bufferSize, PipeOptions options)
     {
         _logger = logger;
 
         Instances = instances;
+
+        HeaderBufferSize = headerBufferSize;
         BufferSize = bufferSize;
+
         Options = options;
     }
 
@@ -43,23 +48,24 @@ public class PipeConnectionManager
         {
             pipeTasks.Add(
                 Task.Factory.StartNew(
-                    taskAction.Invoke, 
-                    CancellationToken.None, 
-                    TaskCreationOptions.LongRunning, 
+                    taskAction.Invoke,
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
                     TaskScheduler.Default)
                 .Unwrap());
         }
         return Task.WhenAll(pipeTasks);
-    }    
+    }
 
     protected async Task RunServerMessageLoop(
-        CancellationToken token, 
-        string pipeName, 
-        Func<NamedPipeServerStream, CancellationToken, Task> action)
-    {        
+        CancellationToken token,
+        string pipeName,
+        Func<PipeProtocol, CancellationToken, Task> action)
+    {
+        var connectionBuffer = new byte[8];
         while (!token.IsCancellationRequested)
         {
-            bool isConnected = false;
+            var isConnected = false;
             var serverPipeStream = new NamedPipeServerStream(pipeName, PipeDirection.InOut, Instances, PipeTransmissionMode.Byte, Options, BufferSize, BufferSize);
             try
             {
@@ -67,9 +73,13 @@ public class PipeConnectionManager
                 {
                     isConnected = true;
                     OnServerConnect?.Invoke();
+                    Array.Copy(BitConverter.GetBytes(HeaderBufferSize), 0, connectionBuffer, 0, 4);
+                    Array.Copy(BitConverter.GetBytes(BufferSize), 0, connectionBuffer, 4, 4);
+                    await serverPipeStream.WriteAsync(connectionBuffer, 0, connectionBuffer.Length, token);
+                    var protocol = new PipeProtocol(serverPipeStream, HeaderBufferSize, BufferSize);
                     while (!token.IsCancellationRequested && serverPipeStream.IsConnected)
                     {
-                        await action.Invoke(serverPipeStream, token);
+                        await action.Invoke(protocol, token);
                     }
                 }
             }
@@ -91,23 +101,22 @@ public class PipeConnectionManager
     }
 
     protected void ProcessClientMessage<T>(
-        ConcurrentDictionary<string, MessageChannel<T>> messageChannels, 
+        ConcurrentDictionary<string, PipeMessageChannel<T>> messageChannels,
         string pipeName,
-        T message,                       
-        Func<T, NamedPipeClientStream, CancellationToken, Task> messageDispatch,
+        T message,
+        Func<T, PipeProtocol, CancellationToken, Task> messageDispatch,
         CancellationToken token)
     {
         var messageChannelCreated = false;
         while (!messageChannelCreated)
         {
-            MessageChannel<T> messageChannel = messageChannels.GetOrAdd(pipeName, new MessageChannel<T>());
+            PipeMessageChannel<T> messageChannel = messageChannels.GetOrAdd(pipeName, new PipeMessageChannel<T>());
             lock (messageChannel)
             {
                 //avoid race condition between creation and removal of channel
                 if (messageChannel.Completed)
                     continue;
-                if (messageChannel.Channel == null)
-                    messageChannel.Channel = Channel.CreateUnbounded<T>();
+                messageChannel.Channel ??= Channel.CreateUnbounded<T>();
                 messageChannelCreated = true;
                 //we use unbound channel so TryWrite always will return true, no need to check here
                 messageChannel.Channel.Writer.TryWrite(message);
@@ -115,63 +124,59 @@ public class PipeConnectionManager
                     //if during write time we don't have any active connection tasks - start one
                     StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch, token);
             }
-        }        
+        }
     }
 
     private void StartClientMessageLoop<T>(
-        string pipeName, 
-        ConcurrentDictionary<string, MessageChannel<T>> messageChannels,         
-        MessageChannel<T> messageChannel,
-        Func<T, NamedPipeClientStream, CancellationToken, Task> messageDispatch,
+        string pipeName,
+        ConcurrentDictionary<string, PipeMessageChannel<T>> messageChannels,
+        PipeMessageChannel<T> messageChannel,
+        Func<T, PipeProtocol, CancellationToken, Task> messageDispatch,
         CancellationToken token)
     {
         //after we added item to message channel - start connection tasks which wil connect to client
         //and dispatch all messages from the message channel
-        messageChannel.ChannelTask = StartServerListener(Instances, () => {
-            return RunClientMessageLoop(
-                        token,
-                        pipeName,
-                        TimeSpan.FromSeconds(5),
-                        messageChannel.Channel,
-                        messageDispatch
-                    );
-                });
-        _ = messageChannel.ChannelTask.ContinueWith(_ => 
+        messageChannel.ChannelTask = StartServerListener(
+            Instances,
+            () => RunClientMessageLoop(
+                    token,
+                    pipeName,
+                    TimeSpan.FromSeconds(5),
+                    messageChannel.Channel,
+                    messageDispatch
+                ));
+        _ = messageChannel.ChannelTask.ContinueWith(_ =>
         {
             //lock message channel so no incoming messages can be added to it while we cleaning up
             lock (messageChannel)
-            {                    
-                messageChannel.ChannelTask = null;   
+            {
+                messageChannel.ChannelTask = null;
                 //we are completing connection task here, so check if channel still has active messages
-                //if so - roll out new connection task 
+                //if so - roll out new connection task
                 if (messageChannel.Channel.Reader.Count > 0)
-                    StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch, token);                    
+                    StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch, token);
                 else
                 {
-                    //and if no new pending messages - mark message channel as completed 
-                    //to indicate that we can't longer use it during add operation and remove it from channels collection (e.g. full cleanup)                                                
-                    messageChannels.TryRemove(pipeName, out var removedMessageChannel);
+                    //and if no new pending messages - mark message channel as completed
+                    //to indicate that we can't longer use it during add operation and remove it from channels collection (e.g. full cleanup)
+                    messageChannels.TryRemove(pipeName, out var _);
                     messageChannel.Completed = true;
                 }
-            }            
-        });
+            }
+        }, CancellationToken.None);
     }
 
     private async Task RunClientMessageLoop<T>(
-        CancellationToken token, 
-        string pipeName, 
-        TimeSpan readTimeout, 
-        Channel<T> queue, 
-        Func<T, NamedPipeClientStream, CancellationToken, Task> action)
+        CancellationToken token,
+        string pipeName,
+        TimeSpan readTimeout,
+        Channel<T> queue,
+        Func<T, PipeProtocol, CancellationToken, Task> action)
     {
-        var available = true;
-        while (!token.IsCancellationRequested && available)
+        var connectionBuffer = new byte[8];
+        while (!token.IsCancellationRequested)
         {
-            available = queue.Reader.TryRead(out var item);
-            if (!available)
-                break;
-
-            bool isConnected = false;
+            var isConnected = false;
             var clientPipeStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, Options);
             try
             {
@@ -179,18 +184,21 @@ public class PipeConnectionManager
                 {
                     isConnected = true;
                     OnClientConnect?.Invoke();
+
+                    _ = await clientPipeStream.ReadAsync(connectionBuffer, 0, connectionBuffer.Length, token);
+                    var protocol = new PipeProtocol(
+                        clientPipeStream,
+                        BitConverter.ToInt32(connectionBuffer, 0),
+                        BitConverter.ToInt32(connectionBuffer, 4));
                     while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
-                        await action.Invoke(item, clientPipeStream, token);
-                        available = false;
-                        item = default;
-                        if (!queue.Reader.TryRead(out item))
+                        if (!queue.Reader.TryRead(out var item))
                         {
-                            var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+                            using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
                             readCancellation.CancelAfter(readTimeout);
                             item = await queue.Reader.ReadAsync(readCancellation.Token);
-                            available = true;
-                        }
+                        }                        
+                        await action.Invoke(item, protocol, token);
                     }
                 }
             }
@@ -208,10 +216,6 @@ public class PipeConnectionManager
             }
             finally
             {
-                //put back item to the queue if we read it from channel but did not process
-                //not that available is set to false on successfully execution of action
-                if (available)
-                    await queue.Writer.WriteAsync(item, token);
                 DisconnectClient(clientPipeStream, pipeName);
                 if (isConnected)
                     OnClientDisconnect?.Invoke();

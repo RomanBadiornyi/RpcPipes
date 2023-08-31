@@ -1,8 +1,12 @@
+using System.Text;
+
 namespace RpcPipes;
 
 public class PipeChunkWriteStream : Stream, IAsyncDisposable
 {
+    private const int _bufferReserved = sizeof(int) + 1;
     private bool _closed;
+    private bool _closing;
 
     private readonly byte[] _buffer;
     private readonly int _bufferLength;
@@ -10,18 +14,33 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     private int _bufferPosition;
 
     private readonly Stream _networkStream;
+    private readonly CancellationToken _cancellationToken;
 
-    public PipeChunkWriteStream(byte[] buffer, int bufferLength, Stream networkStream)
+    public PipeChunkWriteStream(byte[] buffer, int bufferLength, Stream networkStream, CancellationToken cancellationToken)
     {
         if (buffer.Length > 0)
             buffer[0] = 0;
 
         _buffer = buffer;
         _bufferLength = bufferLength;
-        _bufferPosition = 1;
+        _bufferPosition = _bufferReserved;
 
         _networkStream = networkStream;
+        _cancellationToken = cancellationToken;
     }
+
+    public Task WriteGuid(Guid id, CancellationToken token)
+        => WriteAsync(id.ToByteArray(), 0, 16, token);
+
+    public Task WriteBoolean(bool val, CancellationToken token)
+        => WriteAsync(BitConverter.GetBytes(val), 0, 1, token);
+
+    public async Task WriteString(string message, CancellationToken token)
+    {
+        var buffer = Encoding.UTF8.GetBytes(message);
+        await WriteAsync(BitConverter.GetBytes(buffer.Length), 0, 4, token);
+        await WriteAsync(buffer, 0, buffer.Length, token);
+    }    
 
     public override void Write(byte[] buffer, int offset, int count)
     {
@@ -41,7 +60,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
             bufferWriteTotal += bufferWriteCount;
 
             if (_bufferPosition == _bufferLength)
-                Flush(false);
+                Flush();
         }
     }
 
@@ -63,44 +82,40 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
             bufferWriteTotal += bufferWriteCount;
 
             if (_bufferPosition == _bufferLength)
-                await FlushAsync(false, cancellationToken);
+                await FlushAsync(cancellationToken);
         }
     }
 
     public override void Flush()
     {
-        Flush(false);
+        if (_closed)
+            return;
+        var flushedBytes = _bufferPosition - _bufferReserved;
+        var flushedBytesArray = BitConverter.GetBytes(flushedBytes);
+        Array.Copy(flushedBytesArray, 0, _buffer, 1, sizeof(int));
+        _buffer[0] = _closing ? (byte)1 : (byte)0;
+        _networkStream.Write(_buffer, 0, _bufferPosition);
+        _bufferPosition = _bufferReserved;
     }
 
     public override async Task FlushAsync(CancellationToken cancellationToken)
     {
-        await FlushAsync(false, cancellationToken);
-    }
-
-    public void Flush(bool isCompleted)
-    {
-        _buffer[0] = isCompleted ? (byte)1 : (byte)0;
-        if (_bufferPosition > 0) 
-        {
-            _networkStream.Write(_buffer, 0, _bufferPosition);
-            _bufferPosition = isCompleted ? 0 : 1;
-        }
-    }
-
-    public async Task FlushAsync(bool isCompleted, CancellationToken cancellationToken) 
-    {
-        _buffer[0] = isCompleted ? (byte)1 : (byte)0;
-        if (_bufferPosition > 0) 
-        {
-            await _networkStream.WriteAsync(_buffer, 0, _bufferPosition, cancellationToken);
-            _bufferPosition = isCompleted ? 0 : 1;
-        }
+        if (_closed)
+            return;
+        var flushedBytes = _bufferPosition - _bufferReserved;
+        var flushedBytesArray = BitConverter.GetBytes(flushedBytes);
+        Array.Copy(flushedBytesArray, 0, _buffer, 1, sizeof(int));
+        _buffer[0] = _closing ? (byte)1 : (byte)0;
+        await _networkStream.WriteAsync(_buffer, 0, _bufferPosition, cancellationToken);
+        _bufferPosition = _bufferReserved;
     }
 
     public async ValueTask DisposeAsync()
     {
+        _closing = true;
+        await FlushAsync(_cancellationToken);
         _closed = true;
-        await FlushAsync(true, CancellationToken.None);
+        _closing = false;
     }
 
     public override int Read(byte[] buffer, int offset, int count)
@@ -125,8 +140,10 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
 
     protected override void Dispose(bool disposing)
     {
+        _closing = true;
+        Flush();
         _closed = true;
-        Flush(true);
+        _closing = false;
     }
 
     public override bool CanRead => false;
