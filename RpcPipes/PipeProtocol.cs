@@ -185,7 +185,10 @@ public class PipeProtocol
         }        
         if (messageIdReceived == messageId && ackReceived)
             return;
-        throw new InvalidOperationException($"Server did not acknowledge receiving of request message {messageId}");
+        if (messageIdReceived == messageId && !ackReceived)
+            throw new InvalidOperationException($"Server did not acknowledge receiving of request message {messageId}");
+
+        throw new InvalidDataException($"Server did not acknowledge receiving of request message {messageId}, received {messageIdReceived}");
     }
 
     private async Task SendAcknowledge(

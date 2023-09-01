@@ -31,7 +31,7 @@ public class PipeServer<TP> : PipeConnectionManager
     private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeServerResponseHandle>> _responseChannels = new();
 
     public PipeServer(ILogger<PipeServer<TP>> logger, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageWriter messageWriter) :
-        base(logger, instances, 4 * 1024, 65 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
+        base(logger, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
 
@@ -145,24 +145,24 @@ public class PipeServer<TP> : PipeConnectionManager
             var progress = default(TP);
             if (_requestsQueue.TryGetValue(progressToken.Id, out var requestMessage))
             {
-                var requestCancellation = requestMessage.Cancellation;
-                if (requestCancellation != null)
+                progress = _progressHandler.GetProgress(progressToken.Id);
+                _logger.LogDebug("send progress update for message {MessageId} to client with value {Progress}", progressToken.Id, progress.Progress);
+                if (!progressToken.Active)
                 {
-                    progress = _progressHandler.GetProgress(progressToken.Id);
-                    _logger.LogDebug("send progress update for message {MessageId} to client with value {Progress}", progressToken.Id, progress.Progress);
-                    if (!progressToken.Active)
+                    try
                     {
-                        try
+                        var requestCancellation = requestMessage.Cancellation;
+                        if (requestCancellation != null)
                         {
                             _logger.LogDebug("requested to cancel requests execution for message {MessageId}", progressToken.Id);
-                            requestCancellation.Cancel();                            
-                        }
-                        catch (ObjectDisposedException)
-                        {
-                            //
+                            requestCancellation.Cancel();                                                                            
                         }
                     }
-                }
+                    catch (ObjectDisposedException)
+                    {
+                        //
+                    }
+                }                
             }
             else
             {
@@ -225,12 +225,27 @@ public class PipeServer<TP> : PipeConnectionManager
         }
         catch (IOException) when (protocol.Connected == false)
         {
+            //force re-connect - as connection was dropped
+            throw;
+        }
+        catch (InvalidDataException)
+        {
+            //force re-connect, possibly corrupted connection with the client
+            throw;
+        }
+        catch (InvalidOperationException e)
+        {
+            _logger.LogError(e, "client rejected reply for message {MessageId} to the client", id);
+            _progressHandler.EndMessageHandling(id);
+            _requestsQueue.TryRemove(id, out _);
+            //drop message and force re-connect, possibly corrupted connection with the client
             throw;
         }
         catch (Exception e)
         {
-            if (pipeResponse.Reply != null)
+            if (pipeResponse.Reply != null && pipeResponse.ReplyError == null)
             {
+                //consider it as serialization error and try to reply error instead to the client
                 _logger.LogError(e, "error occurred while sending reply for message {MessageId} to the client, sending error back to client", id);
                 pipeResponse = new PipeMessageResponse<TRep>();
                 pipeResponse.SetRequestException(e);
@@ -238,9 +253,12 @@ public class PipeServer<TP> : PipeConnectionManager
             }
             else
             {
+                //this means that we were not able to send error back to client, in this case simply drop message 
                 _logger.LogError(e, "unhandled error occurred while sending reply for message {MessageId} to the client", id);
                 _progressHandler.EndMessageHandling(id);
                 _requestsQueue.TryRemove(id, out _);
+                //and throw exception to force re-connect
+                throw;
             }
         }
     }

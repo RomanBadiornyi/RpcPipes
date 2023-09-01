@@ -12,9 +12,9 @@ const string progressPipe = "Progress.TestPipe";
 
 const int connections = 32;
 const int tasks = 8196 * 4;
-const int delay = 15;
+const int delay = 30;
 const int progress = 3;
-const int timeoutMinutes = 3;
+const int timeoutMinutes = 10;
 
 var serviceProvider = new ServiceCollection()
     .AddLogging(loggingBuilder => 

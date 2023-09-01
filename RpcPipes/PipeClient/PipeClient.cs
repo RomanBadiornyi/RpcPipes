@@ -39,7 +39,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
         int instances, 
         IPipeProgressReceiver<TP> progressHandler, 
         IPipeMessageWriter messageWriter) :
-            base(logger, instances, 4 * 1024, 65 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
+            base(logger, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
 

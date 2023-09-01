@@ -174,6 +174,10 @@ public class PipeConnectionManager
         Func<T, PipeProtocol, CancellationToken, Task> action)
     {
         var connectionBuffer = new byte[8];
+        
+        var item = default(T);
+        var itemAvailable = false;
+
         while (!token.IsCancellationRequested)
         {
             var isConnected = false;
@@ -192,18 +196,30 @@ public class PipeConnectionManager
                         BitConverter.ToInt32(connectionBuffer, 4));
                     while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
-                        if (!queue.Reader.TryRead(out var item))
+                        if (!queue.Reader.TryRead(out item))
                         {
+                            itemAvailable = false;
                             using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
                             readCancellation.CancelAfter(readTimeout);
                             item = await queue.Reader.ReadAsync(readCancellation.Token);
-                        }                        
+                        }
+                        itemAvailable = true;                                                
                         await action.Invoke(item, protocol, token);
                     }
                 }
             }
             catch (IOException) when (clientPipeStream.IsConnected == false)
             {
+                break;
+            }
+            catch (InvalidOperationException)
+            {
+                //happens in case of missing Ack exchange
+                break;
+            }
+            catch (InvalidDataException)
+            {
+                //happens in case of incorrect Ack exchange
                 break;
             }
             catch (OperationCanceledException)
@@ -216,6 +232,9 @@ public class PipeConnectionManager
             }
             finally
             {
+                //in case of handled exception - put item back to queue so we retry action on reconnect
+                if (itemAvailable)
+                    await queue.Writer.WriteAsync(item, token);
                 DisconnectClient(clientPipeStream, pipeName);
                 if (isConnected)
                     OnClientDisconnect?.Invoke();
