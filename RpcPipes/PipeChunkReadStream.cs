@@ -43,10 +43,20 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
     public async Task<bool> TryReadBoolean(Action<bool> onRead, CancellationToken token)
     {
         var buffer = new byte[1];
-        var readCount = await ReadAsync(buffer, 0, 1, token);
+        var readCount = await ReadAsync(buffer, 0, sizeof(bool), token);
         if (readCount != buffer.Length)
             return false;
         onRead.Invoke(BitConverter.ToBoolean(buffer, 0));
+        return true;
+    }
+
+    public async Task<bool> TryReadInteger32(Action<int> onRead, CancellationToken token)
+    {
+        var buffer = new byte[sizeof(int)];
+        var readCount = await ReadAsync(buffer, 0, sizeof(int), token);
+        if (readCount != buffer.Length)
+            return false;
+        onRead.Invoke(BitConverter.ToInt32(buffer, 0));
         return true;
     }
 
@@ -64,6 +74,21 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
         onRead.Invoke(Encoding.UTF8.GetString(stringBuffer));
         return true;
     }
+
+    public async Task<bool> ReadTransaction(IEnumerable<Func<PipeChunkReadStream, Task<bool>>> reads)
+    {
+        var allResult = true;
+        foreach (var readOperation in reads)
+        {
+            var result = await readOperation.Invoke(this);
+            if (!result)
+            {
+                allResult = false;
+                break;
+            }
+        }
+        return allResult;
+    }    
 
     public override int Read(byte[] buffer, int offset, int count)
     {

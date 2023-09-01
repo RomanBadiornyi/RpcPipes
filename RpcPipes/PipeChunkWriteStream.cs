@@ -33,7 +33,10 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         => WriteAsync(id.ToByteArray(), 0, 16, token);
 
     public Task WriteBoolean(bool val, CancellationToken token)
-        => WriteAsync(BitConverter.GetBytes(val), 0, 1, token);
+        => WriteAsync(BitConverter.GetBytes(val), 0, sizeof(bool), token);
+
+    public Task WriteInteger32(int val, CancellationToken token)
+        => WriteAsync(BitConverter.GetBytes(val), 0, sizeof(int), token);
 
     public async Task WriteString(string message, CancellationToken token)
     {

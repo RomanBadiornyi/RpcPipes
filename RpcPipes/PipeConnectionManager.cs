@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Threading.Channels;
@@ -73,9 +74,8 @@ public class PipeConnectionManager
                 {
                     isConnected = true;
                     OnServerConnect?.Invoke();
-                    Array.Copy(BitConverter.GetBytes(HeaderBufferSize), 0, connectionBuffer, 0, 4);
-                    Array.Copy(BitConverter.GetBytes(BufferSize), 0, connectionBuffer, 4, 4);
-                    await serverPipeStream.WriteAsync(connectionBuffer, 0, connectionBuffer.Length, token);
+                    await SendHandshakeToClient(serverPipeStream, token);
+                    
                     var protocol = new PipeProtocol(serverPipeStream, HeaderBufferSize, BufferSize);
                     while (!token.IsCancellationRequested && serverPipeStream.IsConnected)
                     {
@@ -98,7 +98,7 @@ public class PipeConnectionManager
                     OnServerDisconnect?.Invoke();
             }
         }
-    }
+    }    
 
     protected void ProcessClientMessage<T>(
         ConcurrentDictionary<string, PipeMessageChannel<T>> messageChannels,
@@ -189,11 +189,7 @@ public class PipeConnectionManager
                     isConnected = true;
                     OnClientConnect?.Invoke();
 
-                    _ = await clientPipeStream.ReadAsync(connectionBuffer, 0, connectionBuffer.Length, token);
-                    var protocol = new PipeProtocol(
-                        clientPipeStream,
-                        BitConverter.ToInt32(connectionBuffer, 0),
-                        BitConverter.ToInt32(connectionBuffer, 4));
+                    var protocol = await CreateClientProtocol(clientPipeStream, token); 
                     while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
                         if (!queue.Reader.TryRead(out item))
@@ -330,4 +326,49 @@ public class PipeConnectionManager
             _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
         }
     }
+
+    private async Task SendHandshakeToClient(NamedPipeServerStream serverPipeStream, CancellationToken token)
+    {
+        var chunkBuffer = ArrayPool<byte>.Shared.Rent(HeaderBufferSize);
+        try
+        {
+            await using (var pipeStream = new PipeChunkWriteStream(chunkBuffer, HeaderBufferSize, serverPipeStream, token))
+            {
+                await pipeStream.WriteInteger32(HeaderBufferSize, token);
+                await pipeStream.WriteInteger32(BufferSize, token);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(chunkBuffer);
+        }
+    }
+
+    private async Task<PipeProtocol> CreateClientProtocol(NamedPipeClientStream clientPipeStream, CancellationToken token)
+    {
+        var chunkBuffer = ArrayPool<byte>.Shared.Rent(HeaderBufferSize);
+        try
+        {
+            int headerBufferSize = HeaderBufferSize;
+            int bufferSize = BufferSize;            
+            await using (var pipeStream = new PipeChunkReadStream(chunkBuffer, HeaderBufferSize, clientPipeStream, token))
+            {
+                if (!await pipeStream.ReadTransaction(
+                    new Func<PipeChunkReadStream, Task<bool>>[] 
+                    {
+                        s => s.TryReadInteger32(val => headerBufferSize = val, token),
+                        s => s.TryReadInteger32(val => bufferSize = val, token)
+                    }
+                ))
+                {
+                    throw new InvalidOperationException("error during handshake with the server");
+                }
+            }
+            return new PipeProtocol(clientPipeStream, headerBufferSize, bufferSize);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(chunkBuffer);
+        }
+    }    
 }

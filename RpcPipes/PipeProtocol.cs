@@ -82,8 +82,7 @@ public class PipeProtocol
         try
         {
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, token);
-            if (await ReadTransaction(
-                pipeStream,
+            if (await pipeStream.ReadTransaction(
                 new Func<PipeChunkReadStream, Task<bool>>[] 
                 {
                     s => s.TryReadGuid(val => message.MessageId = val, token)
@@ -110,8 +109,7 @@ public class PipeProtocol
         try
         {
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, token);
-            if (await ReadTransaction(
-                pipeStream,
+            if (await pipeStream.ReadTransaction(
                 new Func<PipeChunkReadStream, Task<bool>>[] 
                 {
                     s => s.TryReadGuid(val => message.MessageId = val, token),
@@ -169,8 +167,7 @@ public class PipeProtocol
         {
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, token);
             ackReceived = false;
-            var messageRead = await ReadTransaction(
-                pipeStream,
+            var messageRead = await pipeStream.ReadTransaction(
                 new Func<PipeChunkReadStream, Task<bool>>[] 
                 {
                     s => s.TryReadGuid(val => messageIdReceived = val, token),
@@ -214,20 +211,5 @@ public class PipeProtocol
         if (stream is NamedPipeClientStream { IsConnected: true }  server)
             return server.IsConnected;
         return false;
-    }
-    
-    private static async Task<bool> ReadTransaction(PipeChunkReadStream stream, IEnumerable<Func<PipeChunkReadStream, Task<bool>>> reads)
-    {
-        var allResult = true;
-        foreach (var readOperation in reads)
-        {
-            var result = await readOperation.Invoke(stream);
-            if (!result)
-            {
-                allResult = false;
-                break;
-            }
-        }
-        return allResult;
     }
 }
