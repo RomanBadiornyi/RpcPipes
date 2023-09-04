@@ -1,6 +1,6 @@
 namespace RpcPipes;
 
-public class PipeRequestProgress
+public class PipeRequestHeartbeat
 {
     public Guid Id { get; set; }
     public bool Active { get; set; }

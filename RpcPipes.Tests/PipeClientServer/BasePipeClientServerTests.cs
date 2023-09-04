@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using NSubstitute;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeMessageHandlers;
-using RpcPipes.Models.PipeProgress;
+using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.PipeClient;
 using RpcPipes.PipeServer;
@@ -12,32 +12,32 @@ namespace RpcPipes.Tests.PipeClientServer;
 
 public class BasePipeClientServerTests
 {
-    protected ILogger<PipeServer<ProgressMessage>> _serverLogger;
-    protected ILogger<PipeClient<ProgressMessage>> _clientLogger;
+    protected ILogger<PipeServer<HeartbeatMessage>> _serverLogger;
+    protected ILogger<PipeClient<HeartbeatMessage>> _clientLogger;
     protected PipeSerializer _serializer;
     protected PipeMessageHandler _messageHandler;
-    protected PipeProgressMessageHandler _progressHandler;
-    protected ConcurrentBag<ProgressMessage> _progressReplies;
-    protected PipeProgressReceiver _progressMessageReceiver;
+    protected PipeHeartbeatMessageHandler _heartbeatHandler;
+    protected ConcurrentBag<HeartbeatMessage> _heartbeatReplies;
+    protected PipeHeartbeatReceiver _heartbeatMessageReceiver;
 
     [SetUp]
     public void Setup()
     {
-        _serverLogger = Substitute.For<ILogger<PipeServer<ProgressMessage>>>();        
-        _clientLogger = Substitute.For<ILogger<PipeClient<ProgressMessage>>>();        
+        _serverLogger = Substitute.For<ILogger<PipeServer<HeartbeatMessage>>>();
+        _clientLogger = Substitute.For<ILogger<PipeClient<HeartbeatMessage>>>();
 
         _serializer = new PipeSerializer();
-        
+
         _messageHandler = new PipeMessageHandler();
-        _progressHandler = new PipeProgressMessageHandler();
-        
-        _progressReplies = new ConcurrentBag<ProgressMessage>();
-        _progressMessageReceiver = new PipeProgressReceiver(_progressReplies);
+        _heartbeatHandler = new PipeHeartbeatMessageHandler();
+
+        _heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
+        _heartbeatMessageReceiver = new PipeHeartbeatReceiver(_heartbeatReplies);
     }
 
     [TearDown]
     public void TearDown()
     {
-        _progressReplies.Clear();
+        _heartbeatReplies.Clear();
     }
 }

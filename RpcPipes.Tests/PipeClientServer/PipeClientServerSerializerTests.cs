@@ -17,14 +17,14 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             .Returns<PipeMessageRequest<RequestMessage>>(args => throw new InvalidOperationException("deserialize server error"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _heartbeatHandler, serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
@@ -45,14 +45,14 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _heartbeatHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeClient;
 public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposable
-    where TP : IPipeProgress
+    where TP : IPipeHeartbeat
 {
     private readonly ILogger<PipeClient<TP>> _logger;
     
@@ -15,38 +15,38 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     private static Counter<int> _sentMessagesCounter = _meter.CreateCounter<int>("client.sent-messages");
     private static Counter<int> _receivedMessagesCounter = _meter.CreateCounter<int>("client.received-messages");
 
-    private readonly IPipeProgressReceiver<TP> _progressHandler;
+    private readonly IPipeHeartbeatReceiver<TP> _heartBeatHandler;
     private readonly IPipeMessageWriter _messageWriter;
 
     private readonly Task _serverTask;
     private readonly CancellationTokenSource _serverTaskCancellation;
 
     private readonly string _sendPipe;
-    private readonly string _progressPipe;
+    private readonly string _heartBeatPipe;
     private readonly string _receivePipe;
 
     private readonly ConcurrentDictionary<Guid, PipeClientRequestHandle> _requestQueue = new();
 
     private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeClientRequestHandle>> _requestChannels = new();
-    private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeClientRequestHandle>> _progressChannels = new();
+    private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeClientRequestHandle>> _heartBeatsChannels = new();
 
     public PipeClient(
         ILogger<PipeClient<TP>> logger, 
         string sendPipe,          
-        string progressPipe, 
+        string heartBeatPipe, 
         string receivePipe,
         int instances, 
-        IPipeProgressReceiver<TP> progressHandler, 
+        IPipeHeartbeatReceiver<TP> heartBeatHandler, 
         IPipeMessageWriter messageWriter) :
             base(logger, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
 
-        _progressHandler = progressHandler;
+        _heartBeatHandler = heartBeatHandler;
         _messageWriter = messageWriter;
 
         _sendPipe = sendPipe;
-        _progressPipe = progressPipe;
+        _heartBeatPipe = heartBeatPipe;
         _receivePipe = receivePipe;
 
         _serverTaskCancellation = new CancellationTokenSource();
@@ -66,27 +66,27 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             )
             //wait also until we complete all client connections
             .ContinueWith(_ => Task.WhenAll(_requestChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()), CancellationToken.None)
-            .ContinueWith(_ => Task.WhenAll(_progressChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()), CancellationToken.None);
+            .ContinueWith(_ => Task.WhenAll(_heartBeatsChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()), CancellationToken.None);
     }
 
     public async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken token)
     {
         using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-        var requestMessage = new PipeClientRequestHandle(Guid.NewGuid(), _sendPipe, _progressPipe)
+        var requestMessage = new PipeClientRequestHandle(Guid.NewGuid(), _sendPipe, _heartBeatPipe)
         {
             RequestCancellation = requestCancellation,
             ReceiveHandle = new SemaphoreSlim(0),
-            ProgressCheckHandle = new SemaphoreSlim(1),
-            ProgressCheckTime = DateTime.Now,
-            ProgressCheckFrequency = context.ProgressFrequency            
+            HeartbeatCheckHandle = new SemaphoreSlim(1),
+            HeartbeatCheckTime = DateTime.Now,
+            HeartbeatCheckFrequency = context.Heartbeat            
         };
 
         var pipeRequest = new PipeMessageRequest<TReq>();
         var pipeResponse = new PipeMessageResponse<TRep>();
 
         pipeRequest.Request = request;
-        pipeRequest.ProgressFrequency = context.ProgressFrequency;
+        pipeRequest.Heartbeat = context.Heartbeat;
         pipeRequest.Deadline = context.Deadline;        
 
         requestMessage.SendAction =
@@ -152,49 +152,49 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
         if (requestMessageSent)
         {
             _sentMessagesCounter.Add(1);
-            ProcessClientMessage(_progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
+            ProcessClientMessage(_heartBeatsChannels, requestMessage.HeartbeatPipe, requestMessage, HandleHeartbeatMessage, _serverTaskCancellation.Token);
             _logger.LogDebug("sent message {MessageId} for execution", requestMessage.Id);
         }
     }
 
-    private async Task HandleProgressMessage(
+    private async Task HandleHeartbeatMessage(
         PipeClientRequestHandle requestMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
         var requestMessageActive = false;
-        var lastCheckInterval = DateTime.Now - requestMessage.ProgressCheckTime;
-        if (lastCheckInterval < requestMessage.ProgressCheckFrequency)
+        var lastCheckInterval = DateTime.Now - requestMessage.HeartbeatCheckTime;
+        if (lastCheckInterval < requestMessage.HeartbeatCheckFrequency)
         {
-            await Task.Delay(requestMessage.ProgressCheckFrequency - lastCheckInterval, cancellation);
-            ProcessClientMessage(_progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
+            await Task.Delay(requestMessage.HeartbeatCheckFrequency - lastCheckInterval, cancellation);
+            ProcessClientMessage(_heartBeatsChannels, requestMessage.HeartbeatPipe, requestMessage, HandleHeartbeatMessage, _serverTaskCancellation.Token);
             return;
         }
 
         if (!cancellation.IsCancellationRequested)
         {
-            await requestMessage.ProgressCheckHandle.WaitAsync(cancellation);
+            await requestMessage.HeartbeatCheckHandle.WaitAsync(cancellation);
             try
             {
                 requestMessageActive = _requestQueue.ContainsKey(requestMessage.Id);
                 if (requestMessageActive)
                 {
-                    var progressToken = new PipeRequestProgress 
+                    var pipeHeartbeatRequest = new PipeRequestHeartbeat 
                     { 
                         Id = requestMessage.Id, 
                         Active = !requestMessage.RequestCancellation.IsCancellationRequested 
                     };
                     await protocol.TransferMessage(
                         new PipeMessageHeader { MessageId = requestMessage.Id }, 
-                        (s, c) => _messageWriter.WriteData(progressToken, s, c), 
+                        (s, c) => _messageWriter.WriteData(pipeHeartbeatRequest, s, c), 
                         cancellation);
-                    var progress = await protocol.ReceiveMessage(
+                    var pipeHeartbeat = await protocol.ReceiveMessage(
                         (s, c) => _messageWriter.ReadData<TP>(s, c), 
                         cancellation);
-                    if (progress != null)
+                    if (pipeHeartbeat != null)
                     {
-                        if (progress.Progress > 0)
+                        if (pipeHeartbeat.Progress > 0)
                         {
-                            _logger.LogDebug("received progress update for message {MessageId} with value {Progress}", requestMessage.Id, progress.Progress);
-                            await _progressHandler.ReceiveProgress(progress);
+                            _logger.LogDebug("received heartbeat update for message {MessageId} with value {Progress}", requestMessage.Id, pipeHeartbeat.Progress);
+                            await _heartBeatHandler.OnHeartbeatMessage(pipeHeartbeat);
                         }
                     }
                     else
@@ -206,16 +206,16 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "unhandled error occurred while requesting progress for message {MessageId}", requestMessage.Id);
+                _logger.LogError(e, "unhandled error occurred while requesting heartbeat for message {MessageId}", requestMessage.Id);
                 throw;
             }
             finally
             {
-                requestMessage.ProgressCheckHandle.Release();
-                requestMessage.ProgressCheckTime = DateTime.Now;
-                //if message still active, add it back to channel for subsequent progress check
+                requestMessage.HeartbeatCheckHandle.Release();
+                requestMessage.HeartbeatCheckTime = DateTime.Now;
+                //if message still active, add it back to channel for subsequent heartbeat check
                 if (requestMessageActive)
-                    ProcessClientMessage(_progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
+                    ProcessClientMessage(_heartBeatsChannels, requestMessage.HeartbeatPipe, requestMessage, HandleHeartbeatMessage, _serverTaskCancellation.Token);
             }
         }
     }
@@ -225,11 +225,11 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
         PipeClientRequestHandle requestMessage = null;
         var header = await protocol
             .BeginReceiveMessage(id => {
-                //ensure we stop progress task as soon as we started receiving reply
+                //ensure we stop heartbeat task as soon as we started receiving reply
                 if (_requestQueue.TryGetValue(id, out requestMessage))
                 {
                     _requestQueue.TryRemove(id, out _);
-                    _logger.LogDebug("received reply message {MessageId}, cancelled progress updated", requestMessage.Id);
+                    _logger.LogDebug("received reply message {MessageId}, cancelled heartbeat updated", requestMessage.Id);
                 }
                 else
                 {
@@ -239,7 +239,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
 
         if (header != null && requestMessage != null)
         {
-            await requestMessage.ProgressCheckHandle.WaitAsync(requestMessage.RequestCancellation.Token);
+            await requestMessage.HeartbeatCheckHandle.WaitAsync(requestMessage.RequestCancellation.Token);
             try
             {
                 await requestMessage.ReceiveAction.Invoke(protocol, requestMessage.RequestCancellation.Token);
@@ -250,7 +250,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             }
             finally
             {
-                requestMessage.ProgressCheckHandle.Release();
+                requestMessage.HeartbeatCheckHandle.Release();
                 requestMessage.ReceiveHandle.Release();
                 _receivedMessagesCounter.Add(1);
                 _logger.LogDebug("completed processing of reply message {MessageId}", header.MessageId);                

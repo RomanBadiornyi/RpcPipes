@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace RpcPipes.PipeServer;
 
 public class PipeServer<TP> : PipeConnectionManager
-    where TP: IPipeProgress
+    where TP: IPipeHeartbeat
 {
     private readonly ILogger<PipeServer<TP>> _logger;
 
@@ -19,8 +19,8 @@ public class PipeServer<TP> : PipeConnectionManager
     private static Counter<int> _replyMessagesCounter = _meter.CreateCounter<int>("server.reply-messages");
 
     private readonly string _receivePipe;
-    private readonly string _progressPipe;
-    private readonly IPipeProgressHandler<TP> _progressHandler;
+    private readonly string _heartbeatPipe;
+    private readonly IPipeHeartbeatHandler<TP> _heartbeatHandler;
     private readonly IPipeMessageWriter _messageWriter;
 
     private readonly object _sync = new();
@@ -31,14 +31,14 @@ public class PipeServer<TP> : PipeConnectionManager
     private readonly ConcurrentDictionary<Guid, PipeServerRequestHandle> _requestsQueue = new();
     private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeServerResponseHandle>> _responseChannels = new();
 
-    public PipeServer(ILogger<PipeServer<TP>> logger, string receivePipe, string progressPipe, int instances, IPipeProgressHandler<TP> progressHandler, IPipeMessageWriter messageWriter) :
+    public PipeServer(ILogger<PipeServer<TP>> logger, string receivePipe, string heartbeatPipe, int instances, IPipeHeartbeatHandler<TP> heartbeatHandler, IPipeMessageWriter messageWriter) :
         base(logger, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough)
     {
         _logger = logger;
 
         _receivePipe = receivePipe;
-        _progressPipe = progressPipe;
-        _progressHandler = progressHandler;
+        _heartbeatPipe = heartbeatPipe;
+        _heartbeatHandler = heartbeatHandler;
         _messageWriter = messageWriter;
         _serverTask = null;
 
@@ -71,8 +71,8 @@ public class PipeServer<TP> : PipeConnectionManager
                         Instances,
                         taskAction: () => RunServerMessageLoop(
                             _serverTaskCancellation.Token,
-                            _progressPipe,
-                            action: HandleProgressMessage
+                            _heartbeatPipe,
+                            action: HandleHeartbeatMessage
                         )
                     )
                 )
@@ -91,12 +91,12 @@ public class PipeServer<TP> : PipeConnectionManager
         var header = await protocol
             .BeginReceiveMessageAsync(id => {
                 //ensure we add current request to outstanding messages before we complete reading request payload
-                //this way we ensure that when client starts checking progress - we already can reply as we know about this message
+                //this way we ensure that when client starts doing heartbeat calls - we already can reply as we know about this message
                 requestMessage = new PipeServerRequestHandle { Id = id };
                 if (!_requestsQueue.TryAdd(id, requestMessage))
                     requestMessage = null;
                 else
-                    _progressHandler.StartMessageHandling(requestMessage.Id, messageHandler as IPipeProgressReporter<TP>);
+                    _heartbeatHandler.StartMessageHandling(requestMessage.Id, messageHandler as IPipeHeartbeatReporter<TP>);
             }, cancellation);
         if (header != null && requestMessage != null)
         {
@@ -126,23 +126,23 @@ public class PipeServer<TP> : PipeConnectionManager
         }
     }
 
-    private async Task HandleProgressMessage(PipeProtocol protocol, CancellationToken cancellation)
+    private async Task HandleHeartbeatMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
-        var progress = default(TP);
-        var progressToken = await protocol.ReceiveMessage(ReadProgress, cancellation);        
-        if (progressToken != null && !cancellation.IsCancellationRequested)
+        var pipeHeartbeat = default(TP);
+        var pipeHeartbeatRequest = await protocol.ReceiveMessage(ReadHeartbeat, cancellation);        
+        if (pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
         {
-            var progressHeader = new PipeMessageHeader { MessageId = progressToken.Id };
-            if (_requestsQueue.TryGetValue(progressToken.Id, out var requestMessage))
+            var heartbeatHeader = new PipeMessageHeader { MessageId = pipeHeartbeatRequest.Id };
+            if (_requestsQueue.TryGetValue(pipeHeartbeatRequest.Id, out var requestMessage))
             {
-                progress = _progressHandler.GetProgress(progressToken.Id);
-                _logger.LogDebug("send progress update for message {MessageId} to client with value {Progress}", progressToken.Id, progress.Progress);
-                if (!progressToken.Active)
+                pipeHeartbeat = _heartbeatHandler.HeartbeatMessage(pipeHeartbeatRequest.Id);
+                _logger.LogDebug("send heartbeat update for message {MessageId} to client with value {Progress}", pipeHeartbeatRequest.Id, pipeHeartbeat.Progress);
+                if (!pipeHeartbeatRequest.Active)
                 {
                     var requestCancellation = requestMessage.Cancellation;
                     if (requestCancellation != null)
                     {
-                        _logger.LogDebug("requested to cancel requests execution for message {MessageId}", progressToken.Id);
+                        _logger.LogDebug("requested to cancel requests execution for message {MessageId}", pipeHeartbeatRequest.Id);
                         try
                         {
                             requestCancellation.Cancel();
@@ -156,16 +156,16 @@ public class PipeServer<TP> : PipeConnectionManager
             }
             else
             {
-                _logger.LogWarning("requested progress for unknown message {MessageId}", progressToken.Id);
+                _logger.LogWarning("requested heartbeat for unknown message {MessageId}", pipeHeartbeatRequest.Id);
             }
-            await protocol.TransferMessage(progressHeader, WriteProgress, cancellation);
+            await protocol.TransferMessage(heartbeatHeader, WriteHeartbeat, cancellation);
         }
 
-        ValueTask<PipeRequestProgress> ReadProgress(Stream stream, CancellationToken token)
-            => _messageWriter.ReadData<PipeRequestProgress>(stream, token);        
+        ValueTask<PipeRequestHeartbeat> ReadHeartbeat(Stream stream, CancellationToken token)
+            => _messageWriter.ReadData<PipeRequestHeartbeat>(stream, token);        
 
-        Task WriteProgress(Stream stream, CancellationToken token)
-            => _messageWriter.WriteData(progress, stream, token);
+        Task WriteHeartbeat(Stream stream, CancellationToken token)
+            => _messageWriter.WriteData(pipeHeartbeat, stream, token);
     }
 
     private async Task RunRequest<TReq, TRep>(
@@ -178,7 +178,7 @@ public class PipeServer<TP> : PipeConnectionManager
             token.ThrowIfCancellationRequested();
 
             _activeMessagesCounter.Add(1);                        
-            _progressHandler.StartMessageExecute(id, request);
+            _heartbeatHandler.StartMessageExecute(id, request);
             
             pipeResponse.Reply = await messageHandler.HandleRequest(request, token);
             _logger.LogDebug("handled request for message {MessageId}, sending reply back to client", id);
@@ -197,7 +197,7 @@ public class PipeServer<TP> : PipeConnectionManager
         {
             _handledMessagesCounter.Add(1);
             _activeMessagesCounter.Add(-1);
-            _progressHandler.EndMessageExecute(id);
+            _heartbeatHandler.EndMessageExecute(id);
         }
         ScheduleResponseReply(id, replyPipe, pipeResponse);
     }
@@ -215,7 +215,7 @@ public class PipeServer<TP> : PipeConnectionManager
                 token);
             _logger.LogDebug("sent reply for message {MessageId} back to client", id);
 
-            _progressHandler.EndMessageHandling(id);
+            _heartbeatHandler.EndMessageHandling(id);
             _requestsQueue.TryRemove(id, out _);
         }
         catch (IOException) when (protocol.Connected == false)
@@ -231,7 +231,7 @@ public class PipeServer<TP> : PipeConnectionManager
         catch (InvalidOperationException e)
         {
             _logger.LogError(e, "client rejected reply for message {MessageId} to the client", id);
-            _progressHandler.EndMessageHandling(id);
+            _heartbeatHandler.EndMessageHandling(id);
             _requestsQueue.TryRemove(id, out _);
             //drop message and force re-connect, possibly corrupted connection with the client
             throw;
@@ -250,7 +250,7 @@ public class PipeServer<TP> : PipeConnectionManager
             {
                 //this means that we were not able to send error back to client, in this case simply drop message
                 _logger.LogError(e, "unhandled error occurred while sending reply for message {MessageId} to the client", id);
-                _progressHandler.EndMessageHandling(id);
+                _heartbeatHandler.EndMessageHandling(id);
                 _requestsQueue.TryRemove(id, out _);
                 //and throw exception to force re-connect
                 throw;
@@ -302,7 +302,7 @@ public class PipeServer<TP> : PipeConnectionManager
             }
             else
             {
-                _progressHandler.EndMessageHandling(requestMessage.Id);
+                _heartbeatHandler.EndMessageHandling(requestMessage.Id);
                 _requestsQueue.TryRemove(requestMessage.Id, out _);
             }
         }

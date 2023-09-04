@@ -4,17 +4,17 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
-using RpcPipes.Models.PipeProgress;
+using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.PipeClient;
 using RpcPipes;
 
 const string sendPipe = "TestPipe";
-const string progressPipe = "Progress.TestPipe";
+const string heartbeatPipe = "Heartbeat.TestPipe";
 
 const int connections = 32;
 const int tasks = 8196 * 4;
 const int delay = 30;
-const int progress = 3;
+const int heartbeat = 3;
 const int timeoutMinutes = 10;
 
 var serviceProvider = new ServiceCollection()
@@ -30,14 +30,14 @@ var serviceProvider = new ServiceCollection()
         });
     }).BuildServiceProvider();
 
-var logger = serviceProvider.GetRequiredService<ILogger<PipeClient<ProgressMessage>>>();
+var logger = serviceProvider.GetRequiredService<ILogger<PipeClient<HeartbeatMessage>>>();
 
 var serializer = new PipeSerializer();
-var progressReplies = new ConcurrentBag<ProgressMessage>();
-var progressMessageReceiver = new PipeProgressReceiver(progressReplies);
+var heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
+var heartbeatMessageReceiver = new PipeHeartbeatReceiver(heartbeatReplies);
 
 await using (var pipeClient = 
-    new PipeClient<ProgressMessage>(logger, sendPipe, progressPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, progressMessageReceiver, serializer)) 
+    new PipeClient<HeartbeatMessage>(logger, sendPipe, heartbeatPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, heartbeatMessageReceiver, serializer)) 
 {
     var c = pipeClient;
     Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
@@ -64,12 +64,12 @@ await using (var pipeClient =
     }
     finally
     {
-        logger.LogInformation("Progress updated {Count}", progressReplies.Count);
+        logger.LogInformation("Heartbeat updated {Count}", heartbeatReplies.Count);
         logger.LogInformation("Replies {Count}", replies.Length);
         logger.LogInformation("Errors {Count}", errors.Length);
         logger.LogInformation("Completed in {Time}", stopwatch.Elapsed);
 
-        Console.WriteLine("Progress updated {0}", progressReplies.Count);
+        Console.WriteLine("Heartbeat updated {0}", heartbeatReplies.Count);
         Console.WriteLine("Replies {0}", replies.Length);
         Console.WriteLine("Errors {0}", errors.Length);
         Console.WriteLine("Completed in {0}", stopwatch.Elapsed);
@@ -79,7 +79,7 @@ await using (var pipeClient =
         }        
     }
     
-    async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i, PipeClient<ProgressMessage> c)
+    async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i, PipeClient<HeartbeatMessage> c)
     {
         var request = new RequestMessage($"Sample request {i}", delay);
         var cts = new CancellationTokenSource();
@@ -88,7 +88,7 @@ await using (var pipeClient =
         {
             var requestContext = new PipeRequestContext
             {
-                ProgressFrequency = TimeSpan.FromSeconds(progress)
+                Heartbeat = TimeSpan.FromSeconds(heartbeat)
             };
             return (await c.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token), null);
         }

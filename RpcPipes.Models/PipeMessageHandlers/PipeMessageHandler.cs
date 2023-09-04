@@ -4,7 +4,7 @@ namespace RpcPipes.Models.PipeMessageHandlers;
 
 public class PipeMessageHandler :
     IPipeMessageHandler<RequestMessage, ReplyMessage>,
-    IPipeProgressReporter<ProgressMessage>
+    IPipeHeartbeatReporter<HeartbeatMessage>
 {
     private readonly ConcurrentDictionary<object, (DateTime Started, TimeSpan Delay)> _handlingMessages = new();
     
@@ -18,12 +18,12 @@ public class PipeMessageHandler :
         return reply;
     }
 
-    public virtual ProgressMessage GetProgress(object message)
+    public virtual HeartbeatMessage HeartbeatMessage(object message)
     {
         if (_handlingMessages.TryGetValue(message, out var handle))
         {
             var runningTime = (DateTime.Now - handle.Started).TotalSeconds;
-            return new ProgressMessage(runningTime / handle.Delay.TotalSeconds, string.Empty);
+            return new HeartbeatMessage(runningTime / handle.Delay.TotalSeconds, string.Empty);
         }
         return null;
     }    

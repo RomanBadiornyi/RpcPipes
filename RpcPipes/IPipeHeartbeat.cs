@@ -1,6 +1,6 @@
 namespace RpcPipes;
 
-public interface IPipeProgress
+public interface IPipeHeartbeat
 {
     double Progress { get; }
 }

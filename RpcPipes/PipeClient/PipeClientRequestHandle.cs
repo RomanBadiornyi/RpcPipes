@@ -4,12 +4,12 @@ internal class PipeClientRequestHandle
 {
     public Guid Id { get;  }
     public string RequestPipe { get; }
-    public string ProgressPipe { get; }
+    public string HeartbeatPipe { get; }
 
     public SemaphoreSlim ReceiveHandle { get; set; }
-    public SemaphoreSlim ProgressCheckHandle { get; set; }
-    public DateTime ProgressCheckTime { get; set; }
-    public TimeSpan ProgressCheckFrequency { get; set; }
+    public SemaphoreSlim HeartbeatCheckHandle { get; set; }
+    public DateTime HeartbeatCheckTime { get; set; }
+    public TimeSpan HeartbeatCheckFrequency { get; set; }
 
     public Func<PipeProtocol, CancellationToken, Task> SendAction { get; set; }
     public Func<PipeProtocol, CancellationToken, Task> ReceiveAction { get; set; }
@@ -19,10 +19,10 @@ internal class PipeClientRequestHandle
     public int Retries { get; set; }
     public Exception Exception { get; set; }
 
-    public PipeClientRequestHandle(Guid id, string requestPipe, string progressPipe)
+    public PipeClientRequestHandle(Guid id, string requestPipe, string heartbeatPipe)
     {
         Id = id;
         RequestPipe = requestPipe;
-        ProgressPipe = progressPipe;
+        HeartbeatPipe = heartbeatPipe;
     }
 }

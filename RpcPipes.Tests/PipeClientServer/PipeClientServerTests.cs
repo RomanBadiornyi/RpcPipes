@@ -20,14 +20,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns(new ReplyMessage("hi"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 4, _progressHandler, _serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _heartbeatHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 4, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
@@ -57,14 +57,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
         meterListener.Start();
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 4, _progressHandler, _serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _heartbeatHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 4, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
         {            
             pipeClient.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(60);
             pipeServer.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(60);
@@ -77,14 +77,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
             var request = new RequestMessage("hello world", 0.5);
             var requestContext = new PipeRequestContext 
             { 
-                ProgressFrequency = TimeSpan.FromMilliseconds(100)
+                Heartbeat = TimeSpan.FromMilliseconds(100)
             };
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             //4 connections to accept response from server
             Assert.That(connections["client.server-connections"], Is.EqualTo(4));
-            //4 connections to send requests (4 for client requests and 4 for progress requests)
+            //4 connections to send requests (4 for client requests and 4 for heartbeat requests)
             Assert.That(connections["client.client-connections"], Is.EqualTo(8));
-            //8 connections to accept requests from client (4 for requests and 4 for progress)
+            //8 connections to accept requests from client (4 for requests and 4 for heartbeat)
             Assert.That(connections["server.server-connections"], Is.EqualTo(8));
             //4 client connections to send reply back to client
             Assert.That(connections["server.client-connections"], Is.EqualTo(4));
@@ -118,22 +118,22 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns(new ReplyMessage("hi"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 2, _progressHandler, _serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 2, _heartbeatHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
@@ -148,31 +148,31 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_ProgressUpdated()
     {
-        var progressHandler = Substitute.For<IPipeProgressHandler<ProgressMessage>>();
-        progressHandler.GetProgress(Arg.Any<Guid>())
-            .Returns(args => new ProgressMessage(0.1, ""), args => new ProgressMessage(0.5, ""), args => new ProgressMessage(1.0, ""));
+        var heartbeatHandler = Substitute.For<IPipeHeartbeatHandler<HeartbeatMessage>>();
+        heartbeatHandler.HeartbeatMessage(Arg.Any<Guid>())
+            .Returns(args => new HeartbeatMessage(0.1, ""), args => new HeartbeatMessage(0.5, ""), args => new HeartbeatMessage(1.0, ""));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 1, progressHandler, _serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, heartbeatHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             var requestContext = new PipeRequestContext
             {
-                ProgressFrequency = TimeSpan.FromMilliseconds(10)
+                Heartbeat = TimeSpan.FromMilliseconds(10)
             };
             var request = new RequestMessage("hello world", 0.1);
             _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
         }
 
-        Assert.That(_progressReplies, Has.Some.Matches<ProgressMessage>(m => m.Progress == 0.1));
-        Assert.That(_progressReplies, Has.Some.Matches<ProgressMessage>(m => m.Progress == 0.5));
-        Assert.That(_progressReplies, Has.Some.Matches<ProgressMessage>(m => m.Progress == 1.0));
+        Assert.That(_heartbeatReplies, Has.Some.Matches<HeartbeatMessage>(m => m.Progress == 0.1));
+        Assert.That(_heartbeatReplies, Has.Some.Matches<HeartbeatMessage>(m => m.Progress == 0.5));
+        Assert.That(_heartbeatReplies, Has.Some.Matches<HeartbeatMessage>(m => m.Progress == 1.0));
         
         serverStop.Cancel();
         await serverTask;
@@ -182,8 +182,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
     public async Task RequestReply_IntermediateMessageStages_ProgressUpdated()
     {
         var messageHandler = Substitute.ForPartsOf<PipeMessageHandler>();
-        messageHandler.GetProgress(Arg.Any<object>())
-            .Returns(args => new ProgressMessage(0.5, ""));        
+        messageHandler.HeartbeatMessage(Arg.Any<object>())
+            .Returns(args => new HeartbeatMessage(0.5, ""));        
         var serializer = Substitute.ForPartsOf<PipeSerializer>();        
         serializer.ReadRequest<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())            
             .Returns(args => _serializer.ReadRequest<RequestMessage>((Stream)args[0], (CancellationToken)args[1]))
@@ -193,24 +193,24 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .AndDoes(x => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
 
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _heartbeatHandler, serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {            
             var requestContext = new PipeRequestContext 
             {
-                ProgressFrequency = TimeSpan.FromMilliseconds(10)
+                Heartbeat = TimeSpan.FromMilliseconds(10)
             };
             var request = new RequestMessage("hello world", 0.1);
             _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
         }
         
-        Assert.That(_progressReplies, Has.All.Matches<ProgressMessage>(m => m.Progress == 0.5));
+        Assert.That(_heartbeatReplies, Has.All.Matches<HeartbeatMessage>(m => m.Progress == 0.5));
 
         serverStop.Cancel();
         await serverTask;
@@ -224,14 +224,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns<ReplyMessage>(args => throw new InvalidOperationException("handler error"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
+        var pipeServer = new PipeServer<HeartbeatMessage>(
+            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _heartbeatHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();

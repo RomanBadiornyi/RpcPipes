@@ -3,11 +3,11 @@ using Microsoft.Extensions.Logging;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeMessageHandlers;
-using RpcPipes.Models.PipeProgress;
+using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.PipeServer;
 
 const string receivePipe = "TestPipe";
-const string progressPipe = "Progress.TestPipe";
+const string heartbeatPipe = "Heartbeat.TestPipe";
 const int connections = 32;
 
 var cancellationTokenSource = new CancellationTokenSource();
@@ -24,13 +24,13 @@ var serviceProvider = new ServiceCollection()
             options.TimestampFormat = "u";
         });
     }).BuildServiceProvider();
-var logger = serviceProvider.GetRequiredService<ILogger<PipeServer<ProgressMessage>>>();
+var logger = serviceProvider.GetRequiredService<ILogger<PipeServer<HeartbeatMessage>>>();
 
 var serializer = new PipeSerializer();
 var messageHandler = new PipeMessageHandler();
-var progressHandler = new PipeProgressMessageHandler();
+var heartbeatHandler = new PipeHeartbeatMessageHandler();
 
-var pipeServer = new PipeServer<ProgressMessage>(logger, receivePipe, progressPipe, connections, progressHandler, serializer);
+var pipeServer = new PipeServer<HeartbeatMessage>(logger, receivePipe, heartbeatPipe, connections, heartbeatHandler, serializer);
 Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
     e.Cancel = true;
     cancellationTokenSource.Cancel();
