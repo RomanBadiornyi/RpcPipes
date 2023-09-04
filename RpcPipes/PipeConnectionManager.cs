@@ -29,6 +29,7 @@ public class PipeConnectionManager
 
     public TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
     public TimeSpan ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(5);
+    public TimeSpan ConnectionRetryTimeout = TimeSpan.FromSeconds(20);
 
     public PipeConnectionManager(ILogger logger, int instances, int headerBufferSize, int bufferSize, PipeOptions options)
     {
@@ -81,14 +82,14 @@ public class PipeConnectionManager
                         await action.Invoke(protocol, token);
                     }
                 }
+                else 
+                {
+                    await Task.Delay(ConnectionRetryTimeout, token);
+                }
             }
             catch (OperationCanceledException)
             {
                 break;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                throw;
             }
             catch (Exception e)
             {
@@ -199,6 +200,10 @@ public class PipeConnectionManager
                         itemProcessed = true;
                     }
                 }
+                else 
+                {
+                    await Task.Delay(ConnectionRetryTimeout, token);
+                }
             }
             catch (IOException) when (clientPipeStream.IsConnected == false)
             {
@@ -218,10 +223,6 @@ public class PipeConnectionManager
             {
                 break;
             }
-            catch (UnauthorizedAccessException)
-            {
-                throw;
-            }            
             catch (Exception e)
             {
                 _logger.LogError(e, "unhandled error occurred while connecting to the server pipe stream {Pipe}", pipeName);
@@ -257,9 +258,9 @@ public class PipeConnectionManager
         }
         catch (UnauthorizedAccessException e)
         {
-            _logger.LogError(e, "got Unauthorized error, stop connection");
-            throw;
-        }        
+            _logger.LogDebug(e, "connection to {Type} stream pipe {Pipe} got Unauthorized error", "client", pipeName);
+            return false;
+        }   
         catch (Exception e)
         {
             _logger.LogError(e, "connection to {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
@@ -288,8 +289,8 @@ public class PipeConnectionManager
         }
         catch (UnauthorizedAccessException e)
         {
-            _logger.LogError(e, "got Unauthorized error, stop connection");
-            throw;
+            _logger.LogDebug(e, "connection to {Type} stream pipe {Pipe} got Unauthorized error", "client", pipeName);
+            return false;
         }
         catch (Exception e)
         {

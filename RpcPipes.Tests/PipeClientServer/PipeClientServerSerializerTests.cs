@@ -27,8 +27,9 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
+            var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeServerException>(
-                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None));
+                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
             Assert.That(exception.Message, Does.Contain("deserialize server error"));
         }
 
@@ -54,8 +55,9 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, serializer))
         {
             var request = new RequestMessage("hello world", 0);
+            var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<InvalidOperationException>(
-                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None));
+                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
             Assert.That(exception.Message, Does.Contain("deserialize client error"));
         }
 

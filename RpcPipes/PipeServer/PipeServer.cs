@@ -161,8 +161,8 @@ public class PipeServer<TP> : PipeConnectionManager
             await protocol.TransferMessage(progressHeader, WriteProgress, cancellation);
         }
 
-        ValueTask<PipeProgressToken> ReadProgress(Stream stream, CancellationToken token)
-            => _messageWriter.ReadData<PipeProgressToken>(stream, token);        
+        ValueTask<PipeRequestProgress> ReadProgress(Stream stream, CancellationToken token)
+            => _messageWriter.ReadData<PipeRequestProgress>(stream, token);        
 
         Task WriteProgress(Stream stream, CancellationToken token)
             => _messageWriter.WriteData(progress, stream, token);

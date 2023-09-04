@@ -30,9 +30,6 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeClientRequestHandle>> _requestChannels = new();
     private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeClientRequestHandle>> _progressChannels = new();
 
-    public TimeSpan ProgressFrequency = TimeSpan.FromSeconds(5);
-    public TimeSpan Deadline = TimeSpan.FromHours(1);
-
     public PipeClient(
         ILogger<PipeClient<TP>> logger, 
         string sendPipe,          
@@ -72,7 +69,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             .ContinueWith(_ => Task.WhenAll(_progressChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()), CancellationToken.None);
     }
 
-    public async Task<TRep> SendRequest<TReq, TRep>(TReq request, CancellationToken token)
+    public async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken token)
     {
         using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
 
@@ -82,15 +79,15 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             ReceiveHandle = new SemaphoreSlim(0),
             ProgressCheckHandle = new SemaphoreSlim(1),
             ProgressCheckTime = DateTime.Now,
-            ProgressCheckFrequency = ProgressFrequency            
+            ProgressCheckFrequency = context.ProgressFrequency            
         };
 
         var pipeRequest = new PipeMessageRequest<TReq>();
         var pipeResponse = new PipeMessageResponse<TRep>();
 
         pipeRequest.Request = request;
-        pipeRequest.ProgressFrequency = ProgressFrequency;
-        pipeRequest.Deadline = Deadline;        
+        pipeRequest.ProgressFrequency = context.ProgressFrequency;
+        pipeRequest.Deadline = context.Deadline;        
 
         requestMessage.SendAction =
             (c, t) => SendRequest(requestMessage.Id, pipeRequest, c, t);
@@ -180,7 +177,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
                 requestMessageActive = _requestQueue.ContainsKey(requestMessage.Id);
                 if (requestMessageActive)
                 {
-                    var progressToken = new PipeProgressToken 
+                    var progressToken = new PipeRequestProgress 
                     { 
                         Id = requestMessage.Id, 
                         Active = !requestMessage.RequestCancellation.IsCancellationRequested 

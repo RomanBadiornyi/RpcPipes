@@ -6,6 +6,7 @@ using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeProgress;
 using RpcPipes.PipeClient;
+using RpcPipes;
 
 const string sendPipe = "TestPipe";
 const string progressPipe = "Progress.TestPipe";
@@ -35,11 +36,8 @@ var serializer = new PipeSerializer();
 var progressReplies = new ConcurrentBag<ProgressMessage>();
 var progressMessageReceiver = new PipeProgressReceiver(progressReplies);
 
-await using (var pipeClient = new PipeClient<ProgressMessage>(
-    logger, sendPipe, progressPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, progressMessageReceiver, serializer)
-    {
-        ProgressFrequency = TimeSpan.FromSeconds(progress)
-    }) 
+await using (var pipeClient = 
+    new PipeClient<ProgressMessage>(logger, sendPipe, progressPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, progressMessageReceiver, serializer)) 
 {
     var c = pipeClient;
     Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
@@ -88,7 +86,11 @@ await using (var pipeClient = new PipeClient<ProgressMessage>(
         cts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
         try
         {
-            return (await c.SendRequest<RequestMessage, ReplyMessage>(request, cts.Token), null);
+            var requestContext = new PipeRequestContext
+            {
+                ProgressFrequency = TimeSpan.FromSeconds(progress)
+            };
+            return (await c.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token), null);
         }
         catch (Exception e)
         {

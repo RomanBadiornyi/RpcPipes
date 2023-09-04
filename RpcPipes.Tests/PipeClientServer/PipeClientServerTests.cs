@@ -30,7 +30,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 4, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
-            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
+            var requestContext = new PipeRequestContext();
+            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
 
@@ -64,8 +65,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 4, _progressMessageReceiver, _serializer))
-        {
-            pipeClient.ProgressFrequency = TimeSpan.FromMilliseconds(100);
+        {            
             pipeClient.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(60);
             pipeServer.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(60);
             
@@ -75,7 +75,11 @@ public class PipeClientServerTests : BasePipeClientServerTests
             Assert.That(connections["server.client-connections"], Is.EqualTo(0));
 
             var request = new RequestMessage("hello world", 0.5);
-            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
+            var requestContext = new PipeRequestContext 
+            { 
+                ProgressFrequency = TimeSpan.FromMilliseconds(100)
+            };
+            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             //4 connections to accept response from server
             Assert.That(connections["client.server-connections"], Is.EqualTo(4));
             //4 connections to send requests (4 for client requests and 4 for progress requests)
@@ -124,14 +128,16 @@ public class PipeClientServerTests : BasePipeClientServerTests
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
-            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
+            var requestContext = new PipeRequestContext();
+            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
-            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
+            var requestContext = new PipeRequestContext();
+            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
 
@@ -156,9 +162,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
-            pipeClient.ProgressFrequency = TimeSpan.FromMilliseconds(10);
+            var requestContext = new PipeRequestContext
+            {
+                ProgressFrequency = TimeSpan.FromMilliseconds(10)
+            };
             var request = new RequestMessage("hello world", 0.1);
-            _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
+            _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
         }
 
         Assert.That(_progressReplies, Has.Some.Matches<ProgressMessage>(m => m.Progress == 0.1));
@@ -192,10 +201,13 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
-        {
-            pipeClient.ProgressFrequency = TimeSpan.FromMilliseconds(10);
+        {            
+            var requestContext = new PipeRequestContext 
+            {
+                ProgressFrequency = TimeSpan.FromMilliseconds(10)
+            };
             var request = new RequestMessage("hello world", 0.1);
-            _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
+            _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
         }
         
         Assert.That(_progressReplies, Has.All.Matches<ProgressMessage>(m => m.Progress == 0.5));
@@ -222,8 +234,9 @@ public class PipeClientServerTests : BasePipeClientServerTests
             _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
+            var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeServerException>(
-                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None));
+                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
             Assert.That(exception, Is.Not.Null);
             Assert.That(exception.Message, Does.Contain("handler error"));
         }
