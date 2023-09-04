@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Threading.Channels;
@@ -73,8 +72,7 @@ public class PipeConnectionManager
                 if (await WaitForClientConnection(serverPipeStream, pipeName, token))
                 {
                     isConnected = true;
-                    OnServerConnect?.Invoke();
-                    await SendHandshakeToClient(serverPipeStream, token);
+                    OnServerConnect?.Invoke();                    
                     
                     var protocol = new PipeProtocol(serverPipeStream, HeaderBufferSize, BufferSize);
                     while (!token.IsCancellationRequested && serverPipeStream.IsConnected)
@@ -86,6 +84,10 @@ public class PipeConnectionManager
             catch (OperationCanceledException)
             {
                 break;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                throw;
             }
             catch (Exception e)
             {
@@ -110,7 +112,7 @@ public class PipeConnectionManager
         var messageChannelCreated = false;
         while (!messageChannelCreated)
         {
-            PipeMessageChannel<T> messageChannel = messageChannels.GetOrAdd(pipeName, new PipeMessageChannel<T>());
+            var messageChannel = messageChannels.GetOrAdd(pipeName, new PipeMessageChannel<T>());
             lock (messageChannel)
             {
                 //avoid race condition between creation and removal of channel
@@ -145,6 +147,7 @@ public class PipeConnectionManager
                     messageChannel.Channel,
                     messageDispatch
                 ));
+        //run follow up task to cleanup connection if it is no longer in use or spin out new connections if more messages available
         _ = messageChannel.ChannelTask.ContinueWith(_ =>
         {
             //lock message channel so no incoming messages can be added to it while we cleaning up
@@ -189,7 +192,7 @@ public class PipeConnectionManager
                     isConnected = true;
                     OnClientConnect?.Invoke();
 
-                    var protocol = await CreateClientProtocol(clientPipeStream, token); 
+                    var protocol = new PipeProtocol(clientPipeStream, HeaderBufferSize, BufferSize); 
                     while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
                         if (!queue.Reader.TryRead(out item))
@@ -222,6 +225,10 @@ public class PipeConnectionManager
             {
                 break;
             }
+            catch (UnauthorizedAccessException)
+            {
+                throw;
+            }            
             catch (Exception e)
             {
                 _logger.LogError(e, "unhandled error occurred while connecting to the server pipe stream {Pipe}", pipeName);
@@ -255,6 +262,11 @@ public class PipeConnectionManager
             _logger.LogDebug("connection to {Type} stream pipe {Pipe} got interrupted", "server", pipeName);
             return false;
         }
+        catch (UnauthorizedAccessException e)
+        {
+            _logger.LogError(e, "got Unauthorized error, stop connection");
+            throw;
+        }        
         catch (Exception e)
         {
             _logger.LogError(e, "connection to {Type} stream pipe {Pipe} got unhandled error", "server", pipeName);
@@ -280,6 +292,11 @@ public class PipeConnectionManager
         {
             _logger.LogDebug("connection to {Type} stream pipe {Pipe} got interrupted", "client", pipeName);
             return false;
+        }
+        catch (UnauthorizedAccessException e)
+        {
+            _logger.LogError(e, "got Unauthorized error, stop connection");
+            throw;
         }
         catch (Exception e)
         {
@@ -325,50 +342,5 @@ public class PipeConnectionManager
         {
             _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "client", pipeName);
         }
-    }
-
-    private async Task SendHandshakeToClient(NamedPipeServerStream serverPipeStream, CancellationToken token)
-    {
-        var chunkBuffer = ArrayPool<byte>.Shared.Rent(HeaderBufferSize);
-        try
-        {
-            await using (var pipeStream = new PipeChunkWriteStream(chunkBuffer, HeaderBufferSize, serverPipeStream, token))
-            {
-                await pipeStream.WriteInteger32(HeaderBufferSize, token);
-                await pipeStream.WriteInteger32(BufferSize, token);
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(chunkBuffer);
-        }
-    }
-
-    private async Task<PipeProtocol> CreateClientProtocol(NamedPipeClientStream clientPipeStream, CancellationToken token)
-    {
-        var chunkBuffer = ArrayPool<byte>.Shared.Rent(HeaderBufferSize);
-        try
-        {
-            int headerBufferSize = HeaderBufferSize;
-            int bufferSize = BufferSize;            
-            await using (var pipeStream = new PipeChunkReadStream(chunkBuffer, HeaderBufferSize, clientPipeStream, token))
-            {
-                if (!await pipeStream.ReadTransaction(
-                    new Func<PipeChunkReadStream, Task<bool>>[] 
-                    {
-                        s => s.TryReadInteger32(val => headerBufferSize = val, token),
-                        s => s.TryReadInteger32(val => bufferSize = val, token)
-                    }
-                ))
-                {
-                    throw new InvalidOperationException("error during handshake with the server");
-                }
-            }
-            return new PipeProtocol(clientPipeStream, headerBufferSize, bufferSize);
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(chunkBuffer);
-        }
-    }    
+    }  
 }
