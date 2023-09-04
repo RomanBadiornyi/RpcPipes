@@ -28,6 +28,7 @@ public class PipeConnectionManager
     protected Action OnServerDisconnect;
 
     public TimeSpan ConnectionTimeout = TimeSpan.FromSeconds(60);
+    public TimeSpan ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(5);
 
     public PipeConnectionManager(ILogger logger, int instances, int headerBufferSize, int bufferSize, PipeOptions options)
     {
@@ -140,13 +141,8 @@ public class PipeConnectionManager
         //and dispatch all messages from the message channel
         messageChannel.ChannelTask = StartServerListener(
             Instances,
-            () => RunClientMessageLoop(
-                    token,
-                    pipeName,
-                    TimeSpan.FromSeconds(5),
-                    messageChannel.Channel,
-                    messageDispatch
-                ));
+            () => RunClientMessageLoop(token, pipeName, messageChannel.Channel, messageDispatch));
+            
         //run follow up task to cleanup connection if it is no longer in use or spin out new connections if more messages available
         _ = messageChannel.ChannelTask.ContinueWith(_ =>
         {
@@ -172,14 +168,11 @@ public class PipeConnectionManager
     private async Task RunClientMessageLoop<T>(
         CancellationToken token,
         string pipeName,
-        TimeSpan readTimeout,
         Channel<T> queue,
         Func<T, PipeProtocol, CancellationToken, Task> action)
     {
-        var connectionBuffer = new byte[8];
-        
         var item = default(T);
-        var itemAvailable = false;
+        var itemProcessed = true;
 
         while (!token.IsCancellationRequested)
         {
@@ -197,13 +190,13 @@ public class PipeConnectionManager
                     {
                         if (!queue.Reader.TryRead(out item))
                         {
-                            itemAvailable = false;
                             using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
-                            readCancellation.CancelAfter(readTimeout);
+                            readCancellation.CancelAfter(ClientConnectionExpiryTimeout);
                             item = await queue.Reader.ReadAsync(readCancellation.Token);
                         }
-                        itemAvailable = true;                                                
+                        itemProcessed = false;                                                
                         await action.Invoke(item, protocol, token);
+                        itemProcessed = true;
                     }
                 }
             }
@@ -236,7 +229,7 @@ public class PipeConnectionManager
             finally
             {
                 //in case of handled exception - put item back to queue so we retry action on reconnect
-                if (itemAvailable)
+                if (!itemProcessed && !token.IsCancellationRequested)
                     await queue.Writer.WriteAsync(item, token);
                 DisconnectClient(clientPipeStream, pipeName);
                 if (isConnected)

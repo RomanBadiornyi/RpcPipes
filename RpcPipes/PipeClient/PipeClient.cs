@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.IO.Pipes;
 using Microsoft.Extensions.Logging;
 
@@ -7,6 +8,12 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     where TP : IPipeProgress
 {
     private readonly ILogger<PipeClient<TP>> _logger;
+    
+    private static Meter _meter = new("PipeClient");
+    private static Counter<int> _serverConnectionsCounter = _meter.CreateCounter<int>("client.server-connections");
+    private static Counter<int> _clientConnectionsCounter = _meter.CreateCounter<int>("client.client-connections");
+    private static Counter<int> _sentMessagesCounter = _meter.CreateCounter<int>("client.sent-messages");
+    private static Counter<int> _receivedMessagesCounter = _meter.CreateCounter<int>("client.received-messages");
 
     private readonly IPipeProgressReceiver<TP> _progressHandler;
     private readonly IPipeMessageWriter _messageWriter;
@@ -17,11 +24,6 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
     private readonly string _sendPipe;
     private readonly string _progressPipe;
     private readonly string _receivePipe;
-
-    private int _activeConnections;
-    private int _clientConnections;
-    private int _sentMessages;
-    private int _receivedMessages;
 
     private readonly ConcurrentDictionary<Guid, PipeClientRequestHandle> _requestQueue = new();
 
@@ -52,22 +54,11 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
 
         _serverTaskCancellation = new CancellationTokenSource();
 
-        OnServerConnect = () => Interlocked.Increment(ref _activeConnections);
-        OnServerDisconnect = () => Interlocked.Decrement(ref _activeConnections);
+        OnServerConnect = () => _serverConnectionsCounter.Add(1);
+        OnServerDisconnect = () => _serverConnectionsCounter.Add(-1);
 
-        OnClientConnect = () => Interlocked.Increment(ref _clientConnections);
-        OnClientDisconnect = () => Interlocked.Decrement(ref _clientConnections);
-
-        var timer = new Timer(_ => {
-            _logger.LogTrace(
-                "DIAGNOSTIC: active connections {ActiveConnections}. client connections {ClientConnections}",
-                _activeConnections, _clientConnections
-            );
-            _logger.LogTrace(
-                "DIAGNOSTIC: sent messages {SentMessages}, received messages {ReceivedMessages}",
-                _sentMessages, _receivedMessages
-            );
-        }, null, 0, 30000);
+        OnClientConnect = () => _clientConnectionsCounter.Add(1);
+        OnClientDisconnect = () => _clientConnectionsCounter.Add(-1);
 
         _serverTask = Task
             .WhenAll(
@@ -78,10 +69,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             )
             //wait also until we complete all client connections
             .ContinueWith(_ => Task.WhenAll(_requestChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()), CancellationToken.None)
-            .ContinueWith(_ => Task.WhenAll(_progressChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()), CancellationToken.None)
-            .ContinueWith(_ => {
-                timer.Dispose();
-            }, CancellationToken.None);
+            .ContinueWith(_ => Task.WhenAll(_progressChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray()), CancellationToken.None);
     }
 
     public async Task<TRep> SendRequest<TReq, TRep>(TReq request, CancellationToken token)
@@ -166,9 +154,8 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
 
         if (requestMessageSent)
         {
-            Interlocked.Increment(ref _sentMessages);
-            ProcessClientMessage(
-                _progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
+            _sentMessagesCounter.Add(1);
+            ProcessClientMessage(_progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
             _logger.LogDebug("sent message {MessageId} for execution", requestMessage.Id);
         }
     }
@@ -181,8 +168,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
         if (lastCheckInterval < requestMessage.ProgressCheckFrequency)
         {
             await Task.Delay(requestMessage.ProgressCheckFrequency - lastCheckInterval, cancellation);
-            ProcessClientMessage(
-                _progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
+            ProcessClientMessage(_progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
             return;
         }
 
@@ -232,10 +218,7 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
                 requestMessage.ProgressCheckTime = DateTime.Now;
                 //if message still active, add it back to channel for subsequent progress check
                 if (requestMessageActive)
-                {
-                    ProcessClientMessage(
-                        _progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
-                }
+                    ProcessClientMessage(_progressChannels, requestMessage.ProgressPipe, requestMessage, HandleProgressMessage, _serverTaskCancellation.Token);
             }
         }
     }
@@ -272,8 +255,8 @@ public class PipeClient<TP> : PipeConnectionManager, IDisposable, IAsyncDisposab
             {
                 requestMessage.ProgressCheckHandle.Release();
                 requestMessage.ReceiveHandle.Release();
-                _logger.LogDebug("completed processing of reply message {MessageId}", header.MessageId);
-                Interlocked.Increment(ref _receivedMessages);
+                _receivedMessagesCounter.Add(1);
+                _logger.LogDebug("completed processing of reply message {MessageId}", header.MessageId);                
             }
         }
     }

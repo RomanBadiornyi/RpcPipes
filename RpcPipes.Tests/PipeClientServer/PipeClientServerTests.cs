@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using NSubstitute;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeMessageHandlers;
@@ -19,13 +21,13 @@ public class PipeClientServerTests : BasePipeClientServerTests
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeServer<ProgressMessage>(
-            _serverLogger, "TestPipe", "Progress.TestPipe", 1, _progressHandler, _serializer);
+            _serverLogger, "TestPipe", "Progress.TestPipe", 4, _progressHandler, _serializer);
 
         var serverStop = new CancellationTokenSource();
         var serverTask = pipeServer.Start(messageHandler, serverStop.Token);
 
         await using (var pipeClient = new PipeClient<ProgressMessage>(
-            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 1, _progressMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 4, _progressMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
@@ -37,7 +39,75 @@ public class PipeClientServerTests : BasePipeClientServerTests
     }
 
     [Test]
-    public async Task RequestReply_MultipleClients_BrokenPipeHandled()
+    public async Task RequestReply_AllConnectedOnMessageSendAndDisconnectedOnDispose()
+    {
+        var connections = new Dictionary<string, int>();
+        connections.TryAdd("client.server-connections", 0);
+        connections.TryAdd("client.client-connections", 0);
+        connections.TryAdd("server.server-connections", 0);
+        connections.TryAdd("server.client-connections", 0);
+        using MeterListener meterListener = new();
+        meterListener.InstrumentPublished = (instrument, listener) =>
+        {
+            if (connections.ContainsKey(instrument.Name))
+                listener.EnableMeasurementEvents(instrument);
+        };        
+        meterListener.SetMeasurementEventCallback<int>(OnMeasurementRecorded);
+        meterListener.Start();
+        
+        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var pipeServer = new PipeServer<ProgressMessage>(
+            _serverLogger, "TestPipe", "Progress.TestPipe", 4, _progressHandler, _serializer);
+
+        var serverStop = new CancellationTokenSource();
+        var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
+
+        await using (var pipeClient = new PipeClient<ProgressMessage>(
+            _clientLogger, "TestPipe", "Progress.TestPipe", clientId, 4, _progressMessageReceiver, _serializer))
+        {
+            pipeClient.ProgressFrequency = TimeSpan.FromMilliseconds(100);
+            pipeClient.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(60);
+            pipeServer.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(60);
+            
+            Assert.That(connections["client.server-connections"], Is.EqualTo(0));
+            Assert.That(connections["client.client-connections"], Is.EqualTo(0));
+            Assert.That(connections["server.server-connections"], Is.EqualTo(0));
+            Assert.That(connections["server.client-connections"], Is.EqualTo(0));
+
+            var request = new RequestMessage("hello world", 0.5);
+            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, CancellationToken.None);
+            //4 connections to accept response from server
+            Assert.That(connections["client.server-connections"], Is.EqualTo(4));
+            //4 connections to send requests (4 for client requests and 4 for progress requests)
+            Assert.That(connections["client.client-connections"], Is.EqualTo(8));
+            //8 connections to accept requests from client (4 for requests and 4 for progress)
+            Assert.That(connections["server.server-connections"], Is.EqualTo(8));
+            //4 client connections to send reply back to client
+            Assert.That(connections["server.client-connections"], Is.EqualTo(4));
+        }
+
+        Assert.That(connections["client.server-connections"], Is.EqualTo(0));
+        Assert.That(connections["client.client-connections"], Is.EqualTo(0));
+        Assert.That(connections["server.server-connections"], Is.EqualTo(0));
+        //at this point client connections will still be active as it does not receive disconnect signal and we didn't dispose server
+        Assert.That(connections["server.client-connections"], Is.EqualTo(4));
+
+        serverStop.Cancel();
+        await serverTask;
+
+        Assert.That(connections["server.client-connections"], Is.EqualTo(0));
+       
+        void OnMeasurementRecorded(Instrument instrument, int measurement, ReadOnlySpan<KeyValuePair<string, object>> tags, object state)
+        {
+            lock(connections) 
+            {
+                connections[instrument.Name] += measurement;
+            }            
+        }
+    }    
+
+    [Test]
+    public async Task RequestReply_SameClientIdAndMultipleConnections_AllResponsesReceived()
     {
         var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
