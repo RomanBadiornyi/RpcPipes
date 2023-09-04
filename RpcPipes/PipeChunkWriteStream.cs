@@ -11,7 +11,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     private readonly byte[] _buffer;
     private readonly int _bufferLength;
 
-    private int _bufferPosition;
+    private long _bufferPosition;
 
     private readonly Stream _networkStream;
     private readonly CancellationToken _cancellationToken;
@@ -59,7 +59,8 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
             var bufferWriteCount = bufferWriteLeft < bufferCapacity ? bufferWriteLeft : bufferCapacity;
             Array.Copy(buffer, bufferWriteTotal + offset, _buffer, _bufferPosition, bufferWriteCount);
 
-            _bufferPosition += (int)bufferWriteCount;
+            _bufferPosition += bufferWriteCount;
+            Position += bufferWriteCount;
             bufferWriteTotal += bufferWriteCount;
 
             if (_bufferPosition == _bufferLength)
@@ -81,8 +82,9 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
             var bufferWriteCount = bufferWriteLeft < bufferCapacity ? bufferWriteLeft : bufferCapacity;
             Array.Copy(buffer, bufferWriteTotal + offset, _buffer, _bufferPosition, bufferWriteCount);
 
-            _bufferPosition += (int)bufferWriteCount;
-            bufferWriteTotal += bufferWriteCount;
+            _bufferPosition += bufferWriteCount;
+            Position += bufferWriteCount;
+            bufferWriteTotal += bufferWriteCount;            
 
             if (_bufferPosition == _bufferLength)
                 await FlushAsync(cancellationToken);
@@ -94,10 +96,8 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         if (_closed)
             return;
         var flushedBytes = _bufferPosition - _bufferReserved;
-        var flushedBytesArray = BitConverter.GetBytes(flushedBytes);
-        Array.Copy(flushedBytesArray, 0, _buffer, 1, sizeof(int));
-        _buffer[0] = _closing ? (byte)1 : (byte)0;
-        _networkStream.Write(_buffer, 0, _bufferPosition);
+        SetFlushedLength(_buffer, _closing, (int)flushedBytes);
+        _networkStream.Write(_buffer, 0, (int)_bufferPosition);
         _bufferPosition = _bufferReserved;
     }
 
@@ -106,11 +106,20 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         if (_closed)
             return;
         var flushedBytes = _bufferPosition - _bufferReserved;
-        var flushedBytesArray = BitConverter.GetBytes(flushedBytes);
-        Array.Copy(flushedBytesArray, 0, _buffer, 1, sizeof(int));
-        _buffer[0] = _closing ? (byte)1 : (byte)0;
-        await _networkStream.WriteAsync(_buffer, 0, _bufferPosition, cancellationToken);
+        SetFlushedLength(_buffer, _closing, (int)flushedBytes);
+        await _networkStream.WriteAsync(_buffer, 0, (int)_bufferPosition, cancellationToken);
         _bufferPosition = _bufferReserved;
+    }
+
+    private void SetFlushedLength(byte[] buffer, bool closing, int flushedBytes)
+    {
+        //indicate if this is last buffer or not, so reader know if it should stop
+        buffer[0] = closing ? (byte)1 : (byte)0;
+        //specify what buffer length was written, so reader know how much bytes to read
+        buffer[1] = (byte)flushedBytes;
+        buffer[2] = (byte)(flushedBytes >> 8);
+        buffer[3] = (byte)(flushedBytes >> 16);
+        buffer[4] = (byte)(flushedBytes >> 24);
     }
 
     public async ValueTask DisposeAsync()
@@ -152,6 +161,6 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     public override bool CanRead => false;
     public override bool CanSeek => false;
     public override bool CanWrite => true;
-    public override long Length => _bufferLength;
+    public override long Length => throw new NotSupportedException("Length operation is not supported");
     public override long Position { get; set; } 
 }

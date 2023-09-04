@@ -105,6 +105,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
                 Array.Copy(_buffer, _bufferPosition, buffer, bufferClientPosition, bufferReadCount);
 
             _bufferPosition += bufferReadCount;
+            Position += bufferReadCount;
             bufferClientPosition += bufferReadCount;
             bufferReadTotal += bufferReadCount;
         }
@@ -124,8 +125,9 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
             var bufferReadCount = Math.Min(count - bufferClientPosition, _bufferLengthCurrent - _bufferPosition);
             if (bufferReadCount > 0)
                 Array.Copy(_buffer, _bufferPosition, buffer, bufferClientPosition, bufferReadCount);
-
-            _bufferPosition += bufferReadCount;
+                        
+            _bufferPosition += bufferReadCount;            
+            Position += bufferReadCount;
             bufferClientPosition += bufferReadCount;
             bufferReadTotal += bufferReadCount;
         }
@@ -211,6 +213,6 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
     public override bool CanRead => true;
     public override bool CanSeek => false;
     public override bool CanWrite => false;
-    public override long Length => _bufferLength;
+    public override long Length => throw new NotSupportedException("Length operation is not supported");
     public override long Position { get; set; }
 }
