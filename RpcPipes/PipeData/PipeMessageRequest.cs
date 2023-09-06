@@ -1,4 +1,4 @@
-namespace RpcPipes;
+namespace RpcPipes.PipeData;
 
 public class PipeMessageRequest<T>
 {

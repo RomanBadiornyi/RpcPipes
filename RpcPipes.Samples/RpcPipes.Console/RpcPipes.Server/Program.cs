@@ -1,10 +1,9 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeHeartbeat;
-using RpcPipes.PipeServer;
+using RpcPipes;
 
 const string receivePipe = "TestPipe";
 const string heartbeatPipe = "Heartbeat.TestPipe";
@@ -15,7 +14,7 @@ var cancellationTokenSource = new CancellationTokenSource();
 var serviceProvider = new ServiceCollection()
     .AddLogging(loggingBuilder => 
     {
-        loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+        loggingBuilder.SetMinimumLevel(LogLevel.Warning);
         loggingBuilder.AddSimpleConsole(options => 
         {
             options.IncludeScopes = true;
@@ -24,20 +23,20 @@ var serviceProvider = new ServiceCollection()
             options.TimestampFormat = "u";
         });
     }).BuildServiceProvider();
-var logger = serviceProvider.GetRequiredService<ILogger<PipeServer<HeartbeatMessage>>>();
+var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
 
 var serializer = new PipeSerializer();
 var messageHandler = new PipeMessageHandler();
 var heartbeatHandler = new PipeHeartbeatMessageHandler();
 
-var pipeServer = new PipeServer<HeartbeatMessage>(logger, receivePipe, heartbeatPipe, connections, heartbeatHandler, serializer);
+var pipeServer = new PipeTransportServer(logger, receivePipe, heartbeatPipe, connections, serializer);
 Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
     e.Cancel = true;
     cancellationTokenSource.Cancel();
 };
 
 logger.LogInformation("Starting Server, press Ctrl+C to stop");
-var serverTask = Task.Run(() => pipeServer.Start(messageHandler, cancellationTokenSource.Token));
+var serverTask = Task.Run(() => pipeServer.Start(messageHandler, heartbeatHandler, cancellationTokenSource.Token));
 
 try
 {

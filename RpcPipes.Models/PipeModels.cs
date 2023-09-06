@@ -1,3 +1,5 @@
+using RpcPipes.PipeHeartbeat;
+
 namespace RpcPipes.Models;
 
 public record RequestMessage(string Message, double DelaySeconds);

@@ -1,3 +1,5 @@
+using RpcPipes.PipeData;
+
 namespace RpcPipes;
 
 public interface IPipeMessageWriter

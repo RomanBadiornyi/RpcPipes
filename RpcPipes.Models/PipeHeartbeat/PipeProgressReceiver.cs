@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using RpcPipes.PipeHeartbeat;
 
 namespace RpcPipes.Models.PipeHeartbeat;
 

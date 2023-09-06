@@ -1,8 +1,7 @@
 using NSubstitute;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
-using RpcPipes.PipeClient;
-using RpcPipes.PipeServer;
+using RpcPipes.PipeData;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
@@ -17,13 +16,12 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             .Returns<PipeMessageRequest<RequestMessage>>(args => throw new InvalidOperationException("deserialize server error"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<HeartbeatMessage>(
-            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _heartbeatHandler, serializer);
+        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, serializer);
 
         var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
+        var serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             var request = new RequestMessage("hello world", 0);
@@ -45,13 +43,12 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeServer<HeartbeatMessage>(
-            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _heartbeatHandler, _serializer);
+        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
 
         var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, serverStop.Token);
+        var serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, serverStop.Token);
 
-        await using (var pipeClient = new PipeClient<HeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, serializer))
         {
             var request = new RequestMessage("hello world", 0);

@@ -1,4 +1,4 @@
-namespace RpcPipes;
+namespace RpcPipes.PipeHeartbeat;
 
 public class PipeRequestHeartbeat
 {

@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using System.IO.Pipes;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeTransport;
 
 namespace RpcPipes;
 
@@ -11,6 +12,12 @@ public class PipeMessageChannel<T>
     public Channel<T> Channel;
     public Task ChannelTask;
     public bool Completed;
+}
+
+public class PipeMessageChannelQueue<T>
+{
+    public ConcurrentDictionary<string, PipeMessageChannel<T>> MessageChannels { get; set; }
+    public T Message { get; set; }
 }
 
 public class PipeConnectionManager
@@ -49,17 +56,16 @@ public class PipeConnectionManager
     public Task ProcessServerMessages(string pipeName, Func<PipeProtocol, CancellationToken, Task> action, CancellationToken token)
         => StartServerListener(taskAction: () => RunServerMessageLoop(pipeName, action, token));    
 
-    public void ProcessClientMessage<T>(
-        ConcurrentDictionary<string, PipeMessageChannel<T>> messageChannels,
+    public void ProcessClientMessage<T>(        
         string pipeName,
-        T message,
+        PipeMessageChannelQueue<T> messageQueueRequest,
         Func<T, PipeProtocol, CancellationToken, Task> messageDispatch,
         CancellationToken token)
     {
         var messageChannelCreated = false;
-        while (!messageChannelCreated)
+        while (!messageChannelCreated && !token.IsCancellationRequested)
         {
-            var messageChannel = messageChannels.GetOrAdd(pipeName, new PipeMessageChannel<T>());
+            var messageChannel = messageQueueRequest.MessageChannels.GetOrAdd(pipeName, new PipeMessageChannel<T>());
             lock (messageChannel)
             {
                 //avoid race condition between creation and removal of channel
@@ -68,26 +74,20 @@ public class PipeConnectionManager
                 messageChannel.Channel ??= Channel.CreateUnbounded<T>();
                 messageChannelCreated = true;
                 //we use unbound channel so TryWrite always will return true, no need to check here
-                messageChannel.Channel.Writer.TryWrite(message);
+                messageChannel.Channel.Writer.TryWrite(messageQueueRequest.Message);
                 if (messageChannel.ChannelTask == null)
                     //if during write time we don't have any active connection tasks - start one
-                    StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch, token);
+                    StartClientMessageLoop(pipeName, messageQueueRequest.MessageChannels, messageChannel, messageDispatch, token);
             }
         }
     }
 
     private Task StartServerListener(Func<Task> taskAction)
     {
-        var pipeTasks = new List<Task>();
+        var pipeTasks = new List<Task>();        
         for (var i = 0; i < Instances; i++)
         {
-            pipeTasks.Add(
-                Task.Factory.StartNew(
-                    taskAction.Invoke,
-                    CancellationToken.None,
-                    TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default)
-                .Unwrap());
+            pipeTasks.Add(Task.Run(taskAction));
         }
         return Task.WhenAll(pipeTasks);
     }
@@ -116,9 +116,12 @@ public class PipeConnectionManager
                     await Task.Delay(ConnectionRetryTimeout, token);
                 }
             }
+            catch (IOException) when (serverPipeStream.IsConnected == false)
+            {
+                //happens on disconnect
+            }            
             catch (OperationCanceledException)
             {
-                break;
             }
             catch (Exception e)
             {
@@ -173,10 +176,8 @@ public class PipeConnectionManager
         Func<T, PipeProtocol, CancellationToken, Task> action,
         CancellationToken token)
     {
-        var item = default(T);
-        var itemProcessed = true;
-
-        while (!token.IsCancellationRequested)
+        var readExpired = false;
+        while (!token.IsCancellationRequested && !readExpired)
         {
             var isConnected = false;
             var clientPipeStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, Options);
@@ -190,15 +191,23 @@ public class PipeConnectionManager
                     var protocol = new PipeProtocol(clientPipeStream, HeaderBufferSize, BufferSize);
                     while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
-                        if (!queue.Reader.TryRead(out item))
+                        if (!queue.Reader.TryRead(out var item))
                         {
-                            using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
-                            readCancellation.CancelAfter(ClientConnectionExpiryTimeout);
-                            item = await queue.Reader.ReadAsync(readCancellation.Token);
+                            try
+                            {
+                                using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+                                readCancellation.CancelAfter(ClientConnectionExpiryTimeout);
+                                item = await queue.Reader.ReadAsync(readCancellation.Token);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                readExpired = true;
+                            }
                         }
-                        itemProcessed = false;
-                        await action.Invoke(item, protocol, token);
-                        itemProcessed = true;
+                        if (!readExpired)
+                        {
+                            await action.Invoke(item, protocol, token);
+                        }
                     }
                 }
                 else
@@ -208,21 +217,18 @@ public class PipeConnectionManager
             }
             catch (IOException) when (clientPipeStream.IsConnected == false)
             {
-                break;
+                //happens on disconnect
             }
             catch (InvalidOperationException)
             {
                 //happens in case of missing Ack exchange
-                break;
             }
             catch (InvalidDataException)
             {
                 //happens in case of incorrect Ack exchange
-                break;
             }
             catch (OperationCanceledException)
-            {
-                break;
+            {                
             }
             catch (Exception e)
             {
@@ -230,12 +236,9 @@ public class PipeConnectionManager
             }
             finally
             {
-                //in case of handled exception - put item back to queue so we retry action on reconnect
-                if (!itemProcessed && !token.IsCancellationRequested)
-                    await queue.Writer.WriteAsync(item, token);
                 DisconnectClient(clientPipeStream, pipeName);
                 if (isConnected)
-                    _clientConnectionsCounter.Add(-1);
+                    _clientConnectionsCounter.Add(-1);                
             }
         }
     }

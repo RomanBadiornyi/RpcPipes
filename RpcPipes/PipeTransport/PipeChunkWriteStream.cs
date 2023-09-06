@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace RpcPipes;
+namespace RpcPipes.PipeTransport;
 
 public class PipeChunkWriteStream : Stream, IAsyncDisposable
 {

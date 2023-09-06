@@ -5,22 +5,22 @@ using Microsoft.Extensions.Logging;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeHeartbeat;
-using RpcPipes.PipeClient;
 using RpcPipes;
 
 const string sendPipe = "TestPipe";
 const string heartbeatPipe = "Heartbeat.TestPipe";
 
 const int connections = 32;
-const int tasks = 8196 * 4;
+const int tasks = 250000;
 const int delay = 30;
+const int startUpDelay = 30;
 const int heartbeat = 3;
 const int timeoutMinutes = 10;
 
 var serviceProvider = new ServiceCollection()
     .AddLogging(loggingBuilder => 
     {
-        loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+        loggingBuilder.SetMinimumLevel(LogLevel.Warning);
         loggingBuilder.AddSimpleConsole(options => 
         {
             options.IncludeScopes = true;
@@ -30,14 +30,14 @@ var serviceProvider = new ServiceCollection()
         });
     }).BuildServiceProvider();
 
-var logger = serviceProvider.GetRequiredService<ILogger<PipeClient<HeartbeatMessage>>>();
+var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
 
 var serializer = new PipeSerializer();
 var heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
 var heartbeatMessageReceiver = new PipeHeartbeatReceiver(heartbeatReplies);
 
 await using (var pipeClient = 
-    new PipeClient<HeartbeatMessage>(logger, sendPipe, heartbeatPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, heartbeatMessageReceiver, serializer)) 
+    new PipeTransportClient<HeartbeatMessage>(logger, sendPipe, heartbeatPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, heartbeatMessageReceiver, serializer)) 
 {
     var c = pipeClient;
     Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
@@ -46,7 +46,7 @@ await using (var pipeClient =
     };
 
     logger.LogInformation("Starting client, press Ctrl+C to interrupt");
-
+    var rand = new Random((int)DateTime.UtcNow.Ticks);
     var stopwatch = new Stopwatch();
     var replies = Array.Empty<(ReplyMessage Reply, Exception Error)>();
     var errors = Array.Empty<(ReplyMessage Reply, Exception Error)>();
@@ -79,17 +79,21 @@ await using (var pipeClient =
         }        
     }
     
-    async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i, PipeClient<HeartbeatMessage> c)
+    async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i, PipeTransportClient<HeartbeatMessage> c)
     {
         var request = new RequestMessage($"Sample request {i}", delay);
         var cts = new CancellationTokenSource();
-        cts.CancelAfter(TimeSpan.FromMinutes(timeoutMinutes));
+        var requestTime = TimeSpan.FromMinutes(timeoutMinutes);
+        var heartbeatTime = TimeSpan.FromSeconds(heartbeat);
+        cts.CancelAfter(requestTime);
         try
         {
             var requestContext = new PipeRequestContext
             {
-                Heartbeat = TimeSpan.FromSeconds(heartbeat)
+                Deadline = requestTime,
+                Heartbeat = heartbeatTime
             };
+            await Task.Delay(TimeSpan.FromSeconds(rand.Next(0, startUpDelay)));
             return (await c.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token), null);
         }
         catch (Exception e)

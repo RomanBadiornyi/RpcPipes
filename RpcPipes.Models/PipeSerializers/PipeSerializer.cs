@@ -1,3 +1,5 @@
+using RpcPipes.PipeData;
+
 namespace RpcPipes.Models.PipeSerializers;
 
 public class PipeSerializer : IPipeMessageWriter

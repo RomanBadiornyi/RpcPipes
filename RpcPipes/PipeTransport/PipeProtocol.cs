@@ -1,7 +1,8 @@
 using System.Buffers;
 using System.IO.Pipes;
+using RpcPipes.PipeData;
 
-namespace RpcPipes;
+namespace RpcPipes.PipeTransport;
 
 public class PipeProtocol
 {
@@ -102,7 +103,7 @@ public class PipeProtocol
     }
 
     public async Task<PipeAsyncMessageHeader> BeginReceiveMessageAsync(
-        Action<Guid> onAcceptAction, CancellationToken token)
+        Action<Guid, string> onAcceptAction, CancellationToken token)
     {
         var message = new PipeAsyncMessageHeader();
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
@@ -117,7 +118,7 @@ public class PipeProtocol
                 }
             ))
             {
-                onAcceptAction?.Invoke(message.MessageId);
+                onAcceptAction?.Invoke(message.MessageId, message.ReplyPipe);
                 await SendAcknowledge(message.MessageId, true, token);
                 return message;
             }
@@ -182,7 +183,7 @@ public class PipeProtocol
         }        
         if (messageIdReceived == messageId && ackReceived)
             return;
-        if (messageIdReceived == messageId && !ackReceived)
+        if (messageIdReceived == messageId && !ackReceived || messageIdReceived == Guid.Empty)
             throw new InvalidOperationException($"Server did not acknowledge receiving of request message {messageId}");
 
         throw new InvalidDataException($"Server did not acknowledge receiving of request message {messageId}, received {messageIdReceived}");

@@ -5,15 +5,13 @@ using RpcPipes.Models;
 using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
-using RpcPipes.PipeClient;
-using RpcPipes.PipeServer;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
 public class BasePipeClientServerTests
 {
-    protected ILogger<PipeServer<HeartbeatMessage>> _serverLogger;
-    protected ILogger<PipeClient<HeartbeatMessage>> _clientLogger;
+    protected ILogger<PipeTransportServer> _serverLogger;
+    protected ILogger<PipeTransportClient<HeartbeatMessage>> _clientLogger;
     protected PipeSerializer _serializer;
     protected PipeMessageHandler _messageHandler;
     protected PipeHeartbeatMessageHandler _heartbeatHandler;
@@ -23,8 +21,8 @@ public class BasePipeClientServerTests
     [SetUp]
     public void Setup()
     {
-        _serverLogger = Substitute.For<ILogger<PipeServer<HeartbeatMessage>>>();
-        _clientLogger = Substitute.For<ILogger<PipeClient<HeartbeatMessage>>>();
+        _serverLogger = Substitute.For<ILogger<PipeTransportServer>>();
+        _clientLogger = Substitute.For<ILogger<PipeTransportClient<HeartbeatMessage>>>();
 
         _serializer = new PipeSerializer();
 

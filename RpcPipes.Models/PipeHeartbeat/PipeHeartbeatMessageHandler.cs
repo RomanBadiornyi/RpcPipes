@@ -1,3 +1,5 @@
+using RpcPipes.PipeHeartbeat;
+
 namespace RpcPipes.Models.PipeHeartbeat;
 
 public class PipeHeartbeatMessageHandler : PipeHeartbeatHandler<HeartbeatMessage>
