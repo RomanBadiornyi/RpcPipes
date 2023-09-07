@@ -19,11 +19,11 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns(new ReplyMessage("hi"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);        
+        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);        
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
             var request = new RequestMessage("hello world", 0);
@@ -139,16 +139,21 @@ public class PipeClientServerTests : BasePipeClientServerTests
             });
         }
 
-        Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
-        Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(0));
-        Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
+        Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0),
+            "incorrect server connections on client");
+        Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(0),
+            "incorrect client connections on client");
+        Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0),
+            "incorrect server connections on server");
         //at this point client connections will still be active as it does not receive disconnect signal and we didn't dispose server
-        Assert.That(_connections["PipeTransportServer.client-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(4));
+        Assert.That(_connections["PipeTransportServer.client-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(4),
+            "incorrect server connections on server");
 
         _serverStop.Cancel();
         await _serverTask;
 
-        Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0));               
+        Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0),
+            "incorrect server connections on server");
     }    
 
     [Test]
