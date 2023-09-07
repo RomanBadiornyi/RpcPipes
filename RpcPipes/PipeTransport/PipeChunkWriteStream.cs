@@ -130,6 +130,10 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         {
             await _networkStream.WriteAsync(buffer, offset, count, cancellation);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw new PipeNetworkException(e.Message, e);

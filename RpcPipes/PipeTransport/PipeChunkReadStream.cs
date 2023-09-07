@@ -227,6 +227,10 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
         {
             return await _networkStream.ReadAsync(buffer, offset, count, cancellation);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception e)
         {
             throw new PipeNetworkException(e.Message, e);
