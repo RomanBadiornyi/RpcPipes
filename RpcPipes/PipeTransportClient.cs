@@ -80,6 +80,10 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     {
         var receiveTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+        
+        //automatically and forcefully cancel request if client got disposed.
+        using var clientStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(_connectionsCancellation.Token);
+        clientStopCancellation.Token.Register(() => receiveTaskSource.SetCanceled());
 
         var requestMessage = new PipeClientRequestMessage(Guid.NewGuid())
         {
