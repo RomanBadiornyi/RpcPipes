@@ -122,6 +122,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
                 Heartbeat = TimeSpan.FromMilliseconds(100)
             };
             _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
+            await Task.Delay(TimeSpan.FromSeconds(1));
             Assert.Multiple(() => 
             {
                 //4 connections to accept response from server
