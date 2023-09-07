@@ -29,8 +29,8 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     private readonly IPipeMessageWriter _messageWriter;
 
-    private readonly Task _serverTask;
-    private readonly CancellationTokenSource _serverTaskCancellation;
+    private readonly Task _connectionsTasks;
+    private readonly CancellationTokenSource _connectionsCancellation;
 
     private readonly ConcurrentDictionary<Guid, PipeClientRequestMessage> _requestQueue = new();
 
@@ -39,6 +39,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     internal PipeReplyInHandler ReplyIn { get; }    
 
     public PipeConnectionManager ConnectionPool { get; }
+    public CancellationTokenSource Cancellation => _connectionsCancellation;
 
     public PipeTransportClient(
         ILogger<PipeTransportClient<TP>> logger,
@@ -52,16 +53,16 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         _logger = logger;
         _messageWriter = messageWriter;
 
-        _serverTaskCancellation = new CancellationTokenSource();
+        _connectionsCancellation = new CancellationTokenSource();
 
         ConnectionPool = new PipeConnectionManager(
-            logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _serverTaskCancellation.Token);
+            logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _connectionsCancellation.Token);
 
         HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, ConnectionPool, heartbeatReceiver, _messageWriter);
         RequestOut = new PipeRequestOutHandler(logger, sendPipe, ConnectionPool);
         ReplyIn = new PipeReplyInHandler(logger, receivePipe, ConnectionPool);
 
-        _serverTask = Task
+        _connectionsTasks = Task
             .WhenAll(ReplyIn.Start(GetRequestMessageById))
             //wait until we complete all client connections
             .ContinueWith(_ => Task.WhenAll(RequestOut.ChannelTasks), CancellationToken.None)
@@ -176,13 +177,13 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     public void Dispose()
     {
-        _serverTaskCancellation.Cancel();
-        _serverTask.Wait();
+        _connectionsCancellation.Cancel();
+        _connectionsTasks.Wait();
     }
 
     public async ValueTask DisposeAsync()
     {
-        _serverTaskCancellation.Cancel();
-        await _serverTask;
+        _connectionsCancellation.Cancel();
+        await _connectionsTasks;
     }
 }

@@ -22,6 +22,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
+            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeServerException>(
@@ -47,6 +48,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, serializer))
         {
+            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<InvalidOperationException>(
