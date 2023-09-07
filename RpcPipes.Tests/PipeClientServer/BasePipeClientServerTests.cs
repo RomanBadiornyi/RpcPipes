@@ -112,7 +112,9 @@ public class BasePipeClientServerTests
     [SetUp]
     public void SetupServer()   
     {
+        //forcefully stop in every test server after 60 seconds in order to prevent tests from hanging in case of unexpected behavior
         _serverStop = new CancellationTokenSource();
+        _serverStop.CancelAfter(TimeSpan.FromSeconds(60));
         _serverTask = Task.CompletedTask;
     }
 
