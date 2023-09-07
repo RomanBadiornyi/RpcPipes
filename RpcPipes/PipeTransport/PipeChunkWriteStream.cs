@@ -1,4 +1,5 @@
 using System.Text;
+using RpcPipes.PipeExceptions;
 
 namespace RpcPipes.PipeTransport;
 
@@ -43,13 +44,13 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         var buffer = Encoding.UTF8.GetBytes(message);
         await WriteAsync(BitConverter.GetBytes(buffer.Length), 0, 4, cancellation);
         await WriteAsync(buffer, 0, buffer.Length, cancellation);
-    }    
+    }
 
     public override void Write(byte[] buffer, int offset, int count)
     {
         if (_closed)
             throw new ObjectDisposedException("stream already disposed");
-        
+
         var bufferWriteTotal = 0L;
 
         while (bufferWriteTotal < count)
@@ -72,7 +73,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     {
         if (_closed)
             throw new ObjectDisposedException("stream already disposed");
-        
+
         var bufferWriteTotal = 0L;
 
         while (bufferWriteTotal < count)
@@ -84,7 +85,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
 
             _bufferPosition += bufferWriteCount;
             Position += bufferWriteCount;
-            bufferWriteTotal += bufferWriteCount;            
+            bufferWriteTotal += bufferWriteCount;
 
             if (_bufferPosition == _bufferLength)
                 await FlushAsync(cancellation);
@@ -97,7 +98,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
             return;
         var flushedBytes = _bufferPosition - _bufferReserved;
         SetFlushedLength(_buffer, _closing, (int)flushedBytes);
-        _networkStream.Write(_buffer, 0, (int)_bufferPosition);
+        WriteToNetwork(_buffer, 0, (int)_bufferPosition);
         _bufferPosition = _bufferReserved;
     }
 
@@ -107,8 +108,32 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
             return;
         var flushedBytes = _bufferPosition - _bufferReserved;
         SetFlushedLength(_buffer, _closing, (int)flushedBytes);
-        await _networkStream.WriteAsync(_buffer, 0, (int)_bufferPosition, cancellation);
+        await WriteToNetworkAsync(_buffer, 0, (int)_bufferPosition, cancellation);
         _bufferPosition = _bufferReserved;
+    }
+
+    private void WriteToNetwork(byte[] buffer, int offset, int count)
+    {
+        try
+        {
+            _networkStream.WriteAsync(buffer, offset, count);
+        }
+        catch (Exception e)
+        {
+            throw new PipeNetworkException(e.Message, e);
+        }
+    }
+
+    private async Task WriteToNetworkAsync(byte[] buffer, int offset, int count, CancellationToken cancellation)
+    {
+        try
+        {
+            await _networkStream.WriteAsync(buffer, offset, count, cancellation);
+        }
+        catch (Exception e)
+        {
+            throw new PipeNetworkException(e.Message, e);
+        }
     }
 
     private void SetFlushedLength(byte[] buffer, bool closing, int flushedBytes)
@@ -137,7 +162,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
 
     public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellation)
     {
-        throw new NotSupportedException("ReadAsync operation is not supported");        
+        throw new NotSupportedException("ReadAsync operation is not supported");
     }
 
     public override long Seek(long offset, SeekOrigin origin)
@@ -162,5 +187,5 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     public override bool CanSeek => false;
     public override bool CanWrite => true;
     public override long Length => throw new NotSupportedException("Length operation is not supported");
-    public override long Position { get; set; } 
+    public override long Position { get; set; }
 }

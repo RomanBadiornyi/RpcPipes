@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeExceptions;
 using RpcPipes.PipeHeartbeat;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
@@ -55,27 +56,17 @@ internal class PipeReplyOutHandler
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
             requestMessage.OnMessageCompleted.Invoke(null, true);
         }
-        catch (IOException e) when (protocol.Connected == false)
-        {
-            _logger.LogError(e, "connection got interrupted while sending reply for message {MessageId} to the client", requestMessage.Id);            
-            RetryOrComplete(requestMessage, e);
-            throw;
+        catch (OperationCanceledException)
+        {            
         }
-        catch (InvalidDataException e)
+        catch (PipeDataException e)
         {
-            _logger.LogError(e, "client incorrectly acknowledged receiving reply for message {MessageId} to the client", requestMessage.Id);            
-            RetryOrComplete(requestMessage, e);
-            throw;
-        }
-        catch (InvalidOperationException e)
-        {
-            _logger.LogError(e, "client did not acknowledge receiving reply for message {MessageId} to the client", requestMessage.Id);            
-            RetryOrComplete(requestMessage, e);
-            throw;
+            ReportErrorOrComplete(requestMessage, e);            
         }
         catch (Exception e)
-        {            
-            ReportErrorOrComplete(requestMessage, e);            
+        {
+            RetryOrComplete(requestMessage, e);
+            throw;
         }
     }
 

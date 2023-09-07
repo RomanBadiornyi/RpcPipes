@@ -1,4 +1,5 @@
 using System.Text;
+using RpcPipes.PipeExceptions;
 
 namespace RpcPipes.PipeTransport;
 
@@ -8,7 +9,6 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
     private bool _closed;
 
     private readonly byte[] _buffer;
-    private readonly int _bufferLength;
 
     private int _bufferLengthCurrent;
     private int _bufferPosition;
@@ -22,7 +22,6 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
             buffer[0] = 0;
 
         _buffer = buffer;
-        _bufferLength = bufferLength;
         _bufferLengthCurrent = bufferLength;
         _bufferPosition = _bufferReserved;
 
@@ -88,7 +87,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
             }
         }
         return allResult;
-    }    
+    }
 
     public override int Read(byte[] buffer, int offset, int count)
     {
@@ -125,8 +124,8 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
             var bufferReadCount = Math.Min(count - bufferClientPosition, _bufferLengthCurrent - _bufferPosition);
             if (bufferReadCount > 0)
                 Array.Copy(_buffer, _bufferPosition, buffer, bufferClientPosition, bufferReadCount);
-                        
-            _bufferPosition += bufferReadCount;            
+
+            _bufferPosition += bufferReadCount;
             Position += bufferReadCount;
             bufferClientPosition += bufferReadCount;
             bufferReadTotal += bufferReadCount;
@@ -176,7 +175,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
             return;
         _bufferPosition = _bufferReserved;
         _bufferLengthCurrent = _bufferReserved;
-        var readCount = _networkStream.Read(_buffer, 0, _bufferReserved);
+        var readCount = ReadFromNetwork(_buffer, 0, _bufferReserved);
         if (readCount != _bufferReserved)
             _closed = true;
         if (_closed)
@@ -184,7 +183,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
         _closed = _buffer[0] == 1;
         var readLength = BitConverter.ToInt32(_buffer, 1);
 
-        readCount = _networkStream.Read(_buffer, _bufferReserved, readLength);
+        readCount = ReadFromNetwork(_buffer, _bufferReserved, readLength);
         _bufferLengthCurrent += readCount;
         if (readCount != readLength)
             _closed = true;
@@ -196,7 +195,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
             return;
         _bufferPosition = _bufferReserved;
         _bufferLengthCurrent = _bufferReserved;
-        var readCount = await _networkStream.ReadAsync(_buffer, 0, _bufferReserved, cancellation);
+        var readCount = await ReadFromNetworkAsync(_buffer, 0, _bufferReserved, cancellation);
         if (readCount != _bufferReserved)
             _closed = true;
         if (_closed)
@@ -204,10 +203,34 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
         _closed = _buffer[0] == 1;
         var readLength = BitConverter.ToInt32(_buffer, 1);
 
-        readCount = await _networkStream.ReadAsync(_buffer, _bufferReserved, readLength, cancellation);
+        readCount = await ReadFromNetworkAsync(_buffer, _bufferReserved, readLength, cancellation);
         _bufferLengthCurrent += readCount;
         if (readCount != readLength)
             _closed = true;
+    }
+
+    private int ReadFromNetwork(byte[] buffer, int offset, int count)
+    {
+        try
+        {
+            return _networkStream.Read(buffer, offset, count);
+        }
+        catch (Exception e)
+        {
+            throw new PipeNetworkException(e.Message, e);
+        }
+    }
+
+    private async Task<int> ReadFromNetworkAsync(byte[] buffer, int offset, int count, CancellationToken cancellation)
+    {
+        try
+        {
+            return await _networkStream.ReadAsync(buffer, offset, count, cancellation);
+        }
+        catch (Exception e)
+        {
+            throw new PipeNetworkException(e.Message, e);
+        }
     }
 
     public override bool CanRead => true;

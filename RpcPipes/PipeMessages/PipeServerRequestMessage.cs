@@ -2,7 +2,7 @@ using RpcPipes.PipeTransport;
 
 namespace RpcPipes.PipeMessages;
 
-internal class PipeServerRequestMessage
+internal class PipeServerRequestMessage : IPipeMessage
 {
     public Guid Id { get;  }
     public string ReplyPipe { get;set; }

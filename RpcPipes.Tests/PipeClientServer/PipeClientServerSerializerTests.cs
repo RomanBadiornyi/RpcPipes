@@ -2,6 +2,7 @@ using NSubstitute;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.PipeData;
+using RpcPipes.PipeExceptions;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
@@ -51,8 +52,9 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
-            var exception = Assert.ThrowsAsync<InvalidOperationException>(
+            var exception = Assert.ThrowsAsync<PipeDataException>(
                 () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
+            Assert.That(exception.InnerException, Is.TypeOf<InvalidOperationException>());
             Assert.That(exception.Message, Does.Contain("deserialize client error"));
         }
 

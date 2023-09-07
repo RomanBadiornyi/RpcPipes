@@ -3,11 +3,14 @@ using System.Diagnostics.Metrics;
 using System.IO.Pipes;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeExceptions;
+using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
 
 namespace RpcPipes;
 
 public class PipeMessageChannel<T>
+    where T: IPipeMessage
 {
     public Channel<T> Channel;
     public Task ChannelTask;
@@ -15,13 +18,14 @@ public class PipeMessageChannel<T>
 }
 
 public class PipeMessageChannelQueue<T>
+    where T: IPipeMessage
 {
     public ConcurrentDictionary<string, PipeMessageChannel<T>> MessageChannels { get; set; }
     public T Message { get; set; }
 }
 
 public class PipeConnectionManager
-{    
+{
     private readonly ILogger _logger;
 
     private Counter<int> _serverConnectionsCounter;
@@ -53,15 +57,16 @@ public class PipeConnectionManager
         _serverConnectionsCounter = meter.CreateCounter<int>("server-connections");
         _clientConnectionsCounter = meter.CreateCounter<int>("client-connections");
         _cancellation = cancellation;
-    }    
+    }
 
     public Task ProcessServerMessages(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
-        => StartServerListener(taskAction: () => RunServerMessageLoop(pipeName, action));    
+        => StartServerListener(taskAction: () => RunServerMessageLoop(pipeName, action));
 
-    public void ProcessClientMessage<T>(        
+    public void ProcessClientMessage<T>(
         string pipeName,
         PipeMessageChannelQueue<T> messageQueueRequest,
         Func<T, PipeProtocol, CancellationToken, Task> messageDispatch)
+        where T: IPipeMessage
     {
         var messageChannelCreated = false;
         while (!messageChannelCreated && !_cancellation.IsCancellationRequested)
@@ -84,15 +89,15 @@ public class PipeConnectionManager
     }
 
     private Task StartServerListener(Func<Task> taskAction)
-    {        
-        var pipeTasks = new List<Task>();        
+    {
+        var pipeTasks = new List<Task>();
         for (var i = 0; i < Instances; i++)
         {
             pipeTasks.Add(Task.Run(taskAction));
         }
         return Task.WhenAll(pipeTasks);
     }
-    
+
     private async Task RunServerMessageLoop(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
     {
         while (!_cancellation.IsCancellationRequested)
@@ -117,16 +122,28 @@ public class PipeConnectionManager
                     await Task.Delay(ConnectionRetryTimeout, _cancellation);
                 }
             }
-            catch (IOException) when (serverPipeStream.IsConnected == false)
-            {
-                //happens on disconnect
-            }            
             catch (OperationCanceledException)
             {
             }
+            catch (PipeDataException e)
+            {
+                _logger.LogError(e, "data exception occurred while processing message on pipe stream {PipeName}",
+                    pipeName);
+            }
+            catch (PipeProtocolException e)
+            {
+                _logger.LogError(e, "protocol exception occurred while processing message on pipe stream {PipeName}",
+                    pipeName);
+            }
+            catch (PipeNetworkException e)
+            {
+                _logger.LogError(e, "network exception occurred while processing message on pipe stream {PipeName}",
+                    pipeName);
+            }
             catch (Exception e)
             {
-                _logger.LogError(e, "unhandled error occurred while connecting to the client pipe stream {Pipe}", pipeName);
+                _logger.LogError(e, "unhandled exception occurred while processing message on pipe stream {PipeName}",
+                    pipeName);
             }
             finally
             {
@@ -135,13 +152,14 @@ public class PipeConnectionManager
                     _serverConnectionsCounter.Add(-1);
             }
         }
-    }    
+    }
 
     private void StartClientMessageLoop<T>(
         string pipeName,
         ConcurrentDictionary<string, PipeMessageChannel<T>> messageChannels,
         PipeMessageChannel<T> messageChannel,
         Func<T, PipeProtocol, CancellationToken, Task> messageDispatch)
+        where T: IPipeMessage
     {
         //after we added item to message channel - start connection tasks which wil connect to client
         //and dispatch all messages from the message channel
@@ -171,10 +189,12 @@ public class PipeConnectionManager
     }
 
     private async Task RunClientMessageLoop<T>(string pipeName, Channel<T> queue, Func<T, PipeProtocol, CancellationToken, Task> action)
+        where T: IPipeMessage
     {
         var readExpired = false;
         while (!_cancellation.IsCancellationRequested && !readExpired)
         {
+            T item = default;
             var isConnected = false;
             var clientPipeStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, Options);
             try
@@ -187,7 +207,7 @@ public class PipeConnectionManager
                     var protocol = new PipeProtocol(clientPipeStream, HeaderBufferSize, BufferSize);
                     while (!_cancellation.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
-                        if (!queue.Reader.TryRead(out T item))
+                        if (!queue.Reader.TryRead(out item))
                         {
                             try
                             {
@@ -211,30 +231,34 @@ public class PipeConnectionManager
                     await Task.Delay(ConnectionRetryTimeout, _cancellation);
                 }
             }
-            catch (IOException) when (clientPipeStream.IsConnected == false)
-            {
-                //happens on disconnect
-            }
-            catch (InvalidOperationException)
-            {
-                //happens in case of missing Ack exchange
-            }
-            catch (InvalidDataException)
-            {
-                //happens in case of incorrect Ack exchange
-            }
             catch (OperationCanceledException)
-            {                
+            {
+            }
+            catch (PipeDataException e)
+            {
+                _logger.LogError(e, "data exception occurred while processing message {MessageId} on pipe stream {PipeName}",
+                    item?.Id, pipeName);
+            }
+            catch (PipeProtocolException e)
+            {
+                _logger.LogError(e, "protocol exception occurred while processing message {MessageId} on pipe stream {PipeName}",
+                    item?.Id, pipeName);
+            }
+            catch (PipeNetworkException e)
+            {
+                _logger.LogError(e, "network exception occurred while processing message {MessageId} on pipe stream {PipeName}",
+                    item?.Id, pipeName);
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "unhandled error occurred while connecting to the server pipe stream {Pipe}", pipeName);
+                _logger.LogError(e, "unhandled exception occurred while processing message {MessageId} on pipe stream {PipeName}",
+                    item?.Id, pipeName);
             }
             finally
             {
                 DisconnectClient(clientPipeStream, pipeName);
                 if (isConnected)
-                    _clientConnectionsCounter.Add(-1);                
+                    _clientConnectionsCounter.Add(-1);
             }
         }
     }

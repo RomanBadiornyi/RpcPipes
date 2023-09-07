@@ -1,7 +1,8 @@
 {
     "cSpell.enabled": true,
     "cSpell.words": [
-        "ASPNETCORE"
+        "ASPNETCORE",
+        "occured"
     ],
     "dotnet.defaultSolution": "RpcPipes.sln"
 }

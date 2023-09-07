@@ -109,25 +109,30 @@ public class PipeClientServerTests : BasePipeClientServerTests
             pipeClient.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);            
             pipeServer.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
             
-            Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
-            Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(0));
-            Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
-            Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0));
-
+            Assert.Multiple(() => 
+            {
+                Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
+                Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(0));
+                Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
+                Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0));
+            });
             var request = new RequestMessage("hello world", 0.5);
             var requestContext = new PipeRequestContext 
             { 
                 Heartbeat = TimeSpan.FromMilliseconds(100)
             };
             _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
-            //4 connections to accept response from server
-            Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(4));
-            //4 connections to send requests (4 for client requests and 4 for heartbeat requests)
-            Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(8));
-            //8 connections to accept requests from client (4 for requests and 4 for heartbeat)
-            Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(8));
-            //4 client connections to send reply back to client
-            Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(4));
+            Assert.Multiple(() => 
+            {
+                //4 connections to accept response from server
+                Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(4));
+                //4 connections to send requests (4 for client requests and 4 for heartbeat requests)
+                Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(8));
+                //8 connections to accept requests from client (4 for requests and 4 for heartbeat)
+                Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(8));
+                //4 client connections to send reply back to client
+                Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(4));
+            });
         }
 
         Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0));

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeExceptions;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
 
@@ -55,6 +56,11 @@ internal class PipeRequestOutHandler
         catch (OperationCanceledException)
         {
             requestMessage.ReceiveTask.TrySetCanceled();
+            return;
+        }
+        catch (PipeDataException e)
+        {
+            requestMessage.ReceiveTask.SetException(e);
             return;
         }
         catch (Exception e)

@@ -1,6 +1,6 @@
 namespace RpcPipes.PipeMessages;
 
-internal class PipeClientHeartbeatMessage 
+internal class PipeClientHeartbeatMessage : IPipeMessage 
 {
     public Guid Id { get;  }
 

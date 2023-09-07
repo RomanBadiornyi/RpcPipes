@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.IO.Pipes;
 using RpcPipes.PipeData;
+using RpcPipes.PipeExceptions;
 
 namespace RpcPipes.PipeTransport;
 
@@ -61,6 +62,10 @@ public class PipeProtocol
             await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _contentBuffer, _stream, cancellation);
             await writeFunc.Invoke(pipeStream, cancellation);
         }
+        catch (Exception e) when (e is not PipeNetworkException)
+        {
+            throw new PipeDataException(e.Message, e);
+        } 
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
@@ -140,6 +145,10 @@ public class PipeProtocol
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _contentBuffer, _stream, cancellation);
             message = await readFunc.Invoke(pipeStream, cancellation);
         }
+        catch (Exception e) when (e is not PipeNetworkException)
+        {
+            throw new PipeDataException(e.Message, e);
+        }         
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
@@ -184,9 +193,9 @@ public class PipeProtocol
         if (messageIdReceived == messageId && ackReceived)
             return;
         if (messageIdReceived == messageId && !ackReceived || messageIdReceived == Guid.Empty)
-            throw new InvalidOperationException($"Server did not acknowledge receiving of request message {messageId}");
+            throw new PipeProtocolException($"Server did not acknowledge receiving of request message {messageId}", null);
 
-        throw new InvalidDataException($"Server did not acknowledge receiving of request message {messageId}, received {messageIdReceived}");
+        throw new PipeProtocolException($"Server did not acknowledge receiving of request message {messageId}, received {messageIdReceived}", null);
     }
 
     private async Task SendAcknowledge(
