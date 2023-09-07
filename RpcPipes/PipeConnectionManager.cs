@@ -26,7 +26,7 @@ public class PipeConnectionManager
 
     private Counter<int> _serverConnectionsCounter;
     private Counter<int> _clientConnectionsCounter;
-
+    private CancellationToken _cancellation;
 
     public PipeOptions Options { get; }
     public int Instances { get; }
@@ -38,7 +38,8 @@ public class PipeConnectionManager
     public TimeSpan ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(5);
     public TimeSpan ConnectionRetryTimeout = TimeSpan.FromSeconds(20);
 
-    public PipeConnectionManager(ILogger logger, Meter meter, int instances, int headerBufferSize, int bufferSize, PipeOptions options)
+    public PipeConnectionManager(
+        ILogger logger, Meter meter, int instances, int headerBufferSize, int bufferSize, PipeOptions options, CancellationToken cancellation)
     {
         _logger = logger;
 
@@ -51,19 +52,19 @@ public class PipeConnectionManager
 
         _serverConnectionsCounter = meter.CreateCounter<int>("server-connections");
         _clientConnectionsCounter = meter.CreateCounter<int>("client-connections");
+        _cancellation = cancellation;
     }    
 
-    public Task ProcessServerMessages(string pipeName, Func<PipeProtocol, CancellationToken, Task> action, CancellationToken token)
-        => StartServerListener(taskAction: () => RunServerMessageLoop(pipeName, action, token));    
+    public Task ProcessServerMessages(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
+        => StartServerListener(taskAction: () => RunServerMessageLoop(pipeName, action));    
 
     public void ProcessClientMessage<T>(        
         string pipeName,
         PipeMessageChannelQueue<T> messageQueueRequest,
-        Func<T, PipeProtocol, CancellationToken, Task> messageDispatch,
-        CancellationToken token)
+        Func<T, PipeProtocol, CancellationToken, Task> messageDispatch)
     {
         var messageChannelCreated = false;
-        while (!messageChannelCreated && !token.IsCancellationRequested)
+        while (!messageChannelCreated && !_cancellation.IsCancellationRequested)
         {
             var messageChannel = messageQueueRequest.MessageChannels.GetOrAdd(pipeName, new PipeMessageChannel<T>());
             lock (messageChannel)
@@ -75,15 +76,15 @@ public class PipeConnectionManager
                 messageChannelCreated = true;
                 //we use unbound channel so TryWrite always will return true, no need to check here
                 messageChannel.Channel.Writer.TryWrite(messageQueueRequest.Message);
-                if (messageChannel.ChannelTask == null)
+                if (messageChannel.ChannelTask == null && !_cancellation.IsCancellationRequested)
                     //if during write time we don't have any active connection tasks - start one
-                    StartClientMessageLoop(pipeName, messageQueueRequest.MessageChannels, messageChannel, messageDispatch, token);
+                    StartClientMessageLoop(pipeName, messageQueueRequest.MessageChannels, messageChannel, messageDispatch);
             }
         }
     }
 
     private Task StartServerListener(Func<Task> taskAction)
-    {
+    {        
         var pipeTasks = new List<Task>();        
         for (var i = 0; i < Instances; i++)
         {
@@ -92,28 +93,28 @@ public class PipeConnectionManager
         return Task.WhenAll(pipeTasks);
     }
     
-    private async Task RunServerMessageLoop(string pipeName, Func<PipeProtocol, CancellationToken, Task> action, CancellationToken token)
+    private async Task RunServerMessageLoop(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
     {
-        while (!token.IsCancellationRequested)
+        while (!_cancellation.IsCancellationRequested)
         {
             var isConnected = false;
             var serverPipeStream = new NamedPipeServerStream(pipeName, PipeDirection.InOut, Instances, PipeTransmissionMode.Byte, Options, BufferSize, BufferSize);
             try
             {
-                if (await WaitForClientConnection(serverPipeStream, pipeName, token))
+                if (await WaitForClientConnection(serverPipeStream, pipeName, _cancellation))
                 {
                     isConnected = true;
                     _serverConnectionsCounter.Add(1);
 
                     var protocol = new PipeProtocol(serverPipeStream, HeaderBufferSize, BufferSize);
-                    while (!token.IsCancellationRequested && serverPipeStream.IsConnected)
+                    while (!_cancellation.IsCancellationRequested && serverPipeStream.IsConnected)
                     {
-                        await action.Invoke(protocol, token);
+                        await action.Invoke(protocol, _cancellation);
                     }
                 }
                 else
                 {
-                    await Task.Delay(ConnectionRetryTimeout, token);
+                    await Task.Delay(ConnectionRetryTimeout, _cancellation);
                 }
             }
             catch (IOException) when (serverPipeStream.IsConnected == false)
@@ -140,13 +141,12 @@ public class PipeConnectionManager
         string pipeName,
         ConcurrentDictionary<string, PipeMessageChannel<T>> messageChannels,
         PipeMessageChannel<T> messageChannel,
-        Func<T, PipeProtocol, CancellationToken, Task> messageDispatch,
-        CancellationToken token)
+        Func<T, PipeProtocol, CancellationToken, Task> messageDispatch)
     {
         //after we added item to message channel - start connection tasks which wil connect to client
         //and dispatch all messages from the message channel
         messageChannel.ChannelTask = StartServerListener(
-            () => RunClientMessageLoop(pipeName, messageChannel.Channel, messageDispatch, token));
+            () => RunClientMessageLoop(pipeName, messageChannel.Channel, messageDispatch));
 
         //run follow up task to cleanup connection if it is no longer in use or spin out new connections if more messages available
         _ = messageChannel.ChannelTask.ContinueWith(_ =>
@@ -158,7 +158,7 @@ public class PipeConnectionManager
                 //we are completing connection task here, so check if channel still has active messages
                 //if so - roll out new connection task
                 if (messageChannel.Channel.Reader.Count > 0)
-                    StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch, token);
+                    StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch);
                 else
                 {
                     //and if no new pending messages - mark message channel as completed
@@ -170,34 +170,30 @@ public class PipeConnectionManager
         }, CancellationToken.None);
     }
 
-    private async Task RunClientMessageLoop<T>(
-        string pipeName,
-        Channel<T> queue,
-        Func<T, PipeProtocol, CancellationToken, Task> action,
-        CancellationToken token)
+    private async Task RunClientMessageLoop<T>(string pipeName, Channel<T> queue, Func<T, PipeProtocol, CancellationToken, Task> action)
     {
         var readExpired = false;
-        while (!token.IsCancellationRequested && !readExpired)
+        while (!_cancellation.IsCancellationRequested && !readExpired)
         {
             var isConnected = false;
             var clientPipeStream = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, Options);
             try
             {
-                if (await TryConnectToServer(clientPipeStream, pipeName, ConnectionTimeout, token))
+                if (await TryConnectToServer(clientPipeStream, pipeName, ConnectionTimeout, _cancellation))
                 {
                     isConnected = true;
                     _clientConnectionsCounter.Add(1);
 
                     var protocol = new PipeProtocol(clientPipeStream, HeaderBufferSize, BufferSize);
-                    while (!token.IsCancellationRequested && clientPipeStream.IsConnected)
+                    while (!_cancellation.IsCancellationRequested && clientPipeStream.IsConnected)
                     {
-                        if (!queue.Reader.TryRead(out var item))
+                        if (!queue.Reader.TryRead(out T item))
                         {
                             try
                             {
-                                using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
-                                readCancellation.CancelAfter(ClientConnectionExpiryTimeout);
-                                item = await queue.Reader.ReadAsync(readCancellation.Token);
+                                using var readCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(_cancellation);
+                                readCancellationSource.CancelAfter(ClientConnectionExpiryTimeout);
+                                item = await queue.Reader.ReadAsync(readCancellationSource.Token);
                             }
                             catch (OperationCanceledException)
                             {
@@ -206,13 +202,13 @@ public class PipeConnectionManager
                         }
                         if (!readExpired)
                         {
-                            await action.Invoke(item, protocol, token);
+                            await action.Invoke(item, protocol, _cancellation);
                         }
                     }
                 }
                 else
                 {
-                    await Task.Delay(ConnectionRetryTimeout, token);
+                    await Task.Delay(ConnectionRetryTimeout, _cancellation);
                 }
             }
             catch (IOException) when (clientPipeStream.IsConnected == false)
@@ -243,11 +239,11 @@ public class PipeConnectionManager
         }
     }
 
-    private async Task<bool> WaitForClientConnection(NamedPipeServerStream server, string pipeName, CancellationToken token)
+    private async Task<bool> WaitForClientConnection(NamedPipeServerStream server, string pipeName, CancellationToken cancellation)
     {
         try
         {
-            await server.WaitForConnectionAsync(token);
+            await server.WaitForConnectionAsync(cancellation);
             return true;
         }
         catch (OperationCanceledException)
@@ -272,14 +268,13 @@ public class PipeConnectionManager
         }
     }
 
-    private async Task<bool> TryConnectToServer(NamedPipeClientStream client, string pipeName, TimeSpan timeout, CancellationToken token)
+    private async Task<bool> TryConnectToServer(NamedPipeClientStream client, string pipeName, TimeSpan timeout, CancellationToken cancellation)
     {
-        using var connectionCancellation = new CancellationTokenSource();
-        connectionCancellation.CancelAfter(timeout);
-        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(connectionCancellation.Token, token);
+        using var connectionCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        connectionCancellationSource.CancelAfter(timeout);
         try
         {
-            await client.ConnectAsync(Timeout.Infinite, cancellation.Token);
+            await client.ConnectAsync(Timeout.Infinite, connectionCancellationSource.Token);
             return true;
         }
         catch (OperationCanceledException)

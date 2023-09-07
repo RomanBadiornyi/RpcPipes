@@ -2,5 +2,5 @@
 
 public interface IPipeMessageHandler<in T, TOut>
 {
-    Task<TOut> HandleRequest(T message, CancellationToken token);
+    Task<TOut> HandleRequest(T message, CancellationToken cancellation);
 }

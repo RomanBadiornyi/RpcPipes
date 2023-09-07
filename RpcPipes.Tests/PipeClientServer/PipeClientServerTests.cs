@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics.Metrics;
 using NSubstitute;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeMessageHandlers;
@@ -11,7 +10,7 @@ namespace RpcPipes.Tests.PipeClientServer;
 
 [TestFixture]
 public class PipeClientServerTests : BasePipeClientServerTests
-{    
+{
     [Test]
     public async Task RequestReply_ReplyReceived()
     {
@@ -20,10 +19,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns(new ReplyMessage("hi"));
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, serverStop.Token);
+        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);        
+        _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
@@ -34,79 +31,111 @@ public class PipeClientServerTests : BasePipeClientServerTests
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
 
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
+    }
+
+    [Test]
+    public async Task RequestReply_OnDeadlineReplyCancelled()
+    {
+        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
+        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
+
+        await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+        {
+            var request = new RequestMessage("hello world", 10);
+            var requestContext = new PipeRequestContext { Deadline = TimeSpan.FromMilliseconds(10) };
+            var exception = Assert.ThrowsAsync<PipeServerException>(() =>
+                pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
+            Assert.That(exception, Is.Not.Null);
+            Assert.That(exception.Message, Does.Contain("A task was canceled"));
+        }
+        Assert.That(_messages["active-messages"], Is.EqualTo(0));        
+        Assert.That(_messages["handled-messages"], Is.EqualTo(1));
+
+        Assert.That(_messages["sent-messages"], Is.EqualTo(1));
+        Assert.That(_messages["received-messages"], Is.EqualTo(1));
+
+        _serverStop.Cancel();
+        await _serverTask;
+    }
+
+    [Test]
+    public async Task RequestReply_OnTimeoutReplyCancelled()
+    {
+        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
+        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
+
+        await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
+            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+        {
+            var request = new RequestMessage("hello world", 10);
+            var cts = new CancellationTokenSource();
+            cts.CancelAfter(TimeSpan.FromMilliseconds(10));
+            var requestContext = new PipeRequestContext();
+            var exception = Assert.ThrowsAsync<PipeServerException>(() =>
+                pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token));
+            Assert.That(exception, Is.Not.Null);
+            Assert.That(exception.Message, Does.Contain("A task was canceled"));
+        }
+
+        Assert.That(_messages["active-messages"], Is.EqualTo(0));        
+        Assert.That(_messages["handled-messages"], Is.EqualTo(1));
+
+        Assert.That(_messages["sent-messages"], Is.EqualTo(1));
+        Assert.That(_messages["received-messages"], Is.EqualTo(1));
+
+        _serverStop.Cancel();
+        await _serverTask;
     }
 
     [Test]
     public async Task RequestReply_AllConnectedOnMessageSendAndDisconnectedOnDispose()
-    {
-        var connections = new Dictionary<string, int>();
-        connections.TryAdd("PipeTransportClient.server-connections", 0);
-        connections.TryAdd("PipeTransportClient.client-connections", 0);
-        connections.TryAdd("PipeTransportServer.server-connections", 0);
-        connections.TryAdd("PipeTransportServer.client-connections", 0);
-        using MeterListener meterListener = new();
-        meterListener.InstrumentPublished = (instrument, listener) =>
-        {
-            if (connections.ContainsKey($"{instrument.Meter.Name}.{instrument.Name}"))
-                listener.EnableMeasurementEvents(instrument);
-        };        
-        meterListener.SetMeasurementEventCallback<int>(OnMeasurementRecorded);
-        meterListener.Start();
-        
+    {        
         var clientId = $"TestPipe.{Guid.NewGuid()}";
-        var pipeServer = new PipeTransportServer(
-            _serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, serverStop.Token);
-
-        pipeServer.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
+        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);
+        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
+        
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
-        {            
+        {                        
             pipeClient.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);            
+            pipeServer.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
             
-            Assert.That(connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
-            Assert.That(connections["PipeTransportClient.client-connections"], Is.EqualTo(0));
-            Assert.That(connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
-            Assert.That(connections["PipeTransportServer.client-connections"], Is.EqualTo(0));
+            Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
+            Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(0));
+            Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
+            Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0));
 
             var request = new RequestMessage("hello world", 0.5);
             var requestContext = new PipeRequestContext 
             { 
                 Heartbeat = TimeSpan.FromMilliseconds(100)
             };
-            var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
+            _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             //4 connections to accept response from server
-            Assert.That(connections["PipeTransportClient.server-connections"], Is.EqualTo(4));
+            Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(4));
             //4 connections to send requests (4 for client requests and 4 for heartbeat requests)
-            Assert.That(connections["PipeTransportClient.client-connections"], Is.EqualTo(8));
+            Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(8));
             //8 connections to accept requests from client (4 for requests and 4 for heartbeat)
-            Assert.That(connections["PipeTransportServer.server-connections"], Is.EqualTo(8));
+            Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(8));
             //4 client connections to send reply back to client
-            Assert.That(connections["PipeTransportServer.client-connections"], Is.EqualTo(4));
+            Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(4));
         }
 
-        Assert.That(connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
-        Assert.That(connections["PipeTransportClient.client-connections"], Is.EqualTo(0));
-        Assert.That(connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
+        Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
+        Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(0));
+        Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
         //at this point client connections will still be active as it does not receive disconnect signal and we didn't dispose server
-        Assert.That(connections["PipeTransportServer.client-connections"], Is.EqualTo(4));
+        Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(4));
 
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
 
-        Assert.That(connections["PipeTransportServer.client-connections"], Is.EqualTo(0));
-       
-        void OnMeasurementRecorded(Instrument instrument, int measurement, ReadOnlySpan<KeyValuePair<string, object>> tags, object state)
-        {
-            lock(connections) 
-            {
-                connections[$"{instrument.Meter.Name}.{instrument.Name}"] += measurement;
-            }            
-        }
+        Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0));               
     }    
 
     [Test]
@@ -115,12 +144,9 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
-        
         var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 2, _serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, serverStop.Token);
+        _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
@@ -139,17 +165,15 @@ public class PipeClientServerTests : BasePipeClientServerTests
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
 
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
     }
 
     [Test]
     public async Task RequestReply_MultipleClients_AllResponsesReceived()
     {
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, serverStop.Token);
+        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         var replies = new ConcurrentBag<ReplyMessage>();
         var clientTasks = Enumerable.Range(0, 4).Select(async i => {
@@ -178,8 +202,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
         }
         finally
         {
-            serverStop.Cancel();
-            await serverTask;            
+            _serverStop.Cancel();
+            await _serverTask;            
         }        
     }
 
@@ -192,9 +216,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, heartbeatHandler, serverStop.Token);
+        _serverTask = pipeServer.Start(_messageHandler, heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
@@ -211,8 +233,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
         Assert.That(_heartbeatReplies, Has.Some.Matches<HeartbeatMessage>(m => m.Progress == 0.5));
         Assert.That(_heartbeatReplies, Has.Some.Matches<HeartbeatMessage>(m => m.Progress == 1.0));
         
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
     }
 
     [Test]
@@ -231,9 +253,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, serverStop.Token);
+        _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
@@ -248,8 +268,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
         
         Assert.That(_heartbeatReplies, Has.All.Matches<HeartbeatMessage>(m => m.Progress == 0.5));
 
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
     }
 
     [Test]
@@ -261,9 +281,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, serverStop.Token);
+        _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
@@ -276,7 +294,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             Assert.That(exception.Message, Does.Contain("handler error"));
         }
 
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
     }    
 }

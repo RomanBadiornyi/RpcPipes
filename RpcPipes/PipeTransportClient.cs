@@ -18,7 +18,7 @@ public class PipeRequestContext
 
 public abstract class PipeTransportClient
 {
-    public abstract Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken token);
+    public abstract Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken cancellation);
 }
 
 public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncDisposable
@@ -54,11 +54,12 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
         _serverTaskCancellation = new CancellationTokenSource();
 
-        ConnectionPool = new PipeConnectionManager(logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough);
+        ConnectionPool = new PipeConnectionManager(
+            logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _serverTaskCancellation.Token);
 
-        HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, ConnectionPool, heartbeatReceiver, _messageWriter, _serverTaskCancellation);
-        RequestOut = new PipeRequestOutHandler(logger, sendPipe, ConnectionPool, _serverTaskCancellation);
-        ReplyIn = new PipeReplyInHandler(logger, receivePipe, ConnectionPool, _serverTaskCancellation);
+        HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, ConnectionPool, heartbeatReceiver, _messageWriter);
+        RequestOut = new PipeRequestOutHandler(logger, sendPipe, ConnectionPool);
+        ReplyIn = new PipeReplyInHandler(logger, receivePipe, ConnectionPool);
 
         _serverTask = Task
             .WhenAll(ReplyIn.Start(GetRequestMessageById))
@@ -77,10 +78,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken token)
     {
         var receiveTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-
         using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
-        //cancel receive task when cancellation token triggered
-        requestCancellation.Token.Register(() => receiveTaskSource.TrySetCanceled());
 
         var requestMessage = new PipeClientRequestMessage(Guid.NewGuid())
         {
@@ -104,10 +102,14 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             async (p, t) => { pipeResponse = await ReadReply<TRep>(requestMessage.Id, p, t); };
 
         if (_requestQueue.TryAdd(requestMessage.Id, requestMessage))
-            RequestOut.PublishRequestMessage(requestMessage, 
-                (r) => HeartbeatOut.PublishHeartbeatMessage(r));
+            RequestOut.PublishRequestMessage(requestMessage, StartHeartbeat);
         else
             throw new InvalidOperationException($"Message with {requestMessage.Id} already scheduled");
+
+        void StartHeartbeat(PipeClientHeartbeatMessage requestMessage)
+        {
+            HeartbeatOut.PublishHeartbeatMessage(requestMessage);
+        }
 
         _logger.LogDebug("scheduled request execution for message {MessageId}", requestMessage.Id);
         try
@@ -132,14 +134,14 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         return pipeResponse.Reply;
     }
 
-    private async Task SendRequest<TReq>(Guid id, PipeMessageRequest<TReq> request, PipeProtocol protocol, CancellationToken token)
+    private async Task SendRequest<TReq>(Guid id, PipeMessageRequest<TReq> request, PipeProtocol protocol, CancellationToken cancellation)
     {
         try
         {
             _logger.LogDebug("sending request message {MessageId} to server", id);
             var header = new PipeAsyncMessageHeader { MessageId = id, ReplyPipe = ReplyIn.PipeName };
-            await protocol.BeginTransferMessageAsync(header, token);
-            await protocol.EndTransferMessage(id, Write, token);
+            await protocol.BeginTransferMessageAsync(header, cancellation);
+            await protocol.EndTransferMessage(id, Write, cancellation);
             _logger.LogDebug("sent request message {MessageId} to server", id);
         }
         catch (Exception e)
@@ -152,12 +154,12 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             => _messageWriter.WriteRequest(request, stream, cancellation);
     }
 
-    private async Task<PipeMessageResponse<TRep>> ReadReply<TRep>(Guid id, PipeProtocol protocol, CancellationToken token)
+    private async Task<PipeMessageResponse<TRep>> ReadReply<TRep>(Guid id, PipeProtocol protocol, CancellationToken cancellation)
     {
         try
         {
             _logger.LogDebug("receiving reply for message {MessageId} from server", id);
-            var response = await protocol.EndReceiveMessage(id, Read, token);
+            var response = await protocol.EndReceiveMessage(id, Read, cancellation);
             _logger.LogDebug("received reply for message {MessageId} from server", id);
             return response;
         }

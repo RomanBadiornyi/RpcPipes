@@ -20,78 +20,78 @@ public class PipeProtocol
     }    
 
     public async Task BeginTransferMessage(
-        PipeMessageHeader header, CancellationToken token)
+        PipeMessageHeader header, CancellationToken cancellation)
     {
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _headerBuffer, _stream, token);
-            await pipeStream.WriteGuid(header.MessageId, token);
+            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _headerBuffer, _stream, cancellation);
+            await pipeStream.WriteGuid(header.MessageId, cancellation);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-        await WaitAcknowledge(header.MessageId, token);
+        await WaitAcknowledge(header.MessageId, cancellation);
     }
 
     public async Task BeginTransferMessageAsync(
-        PipeAsyncMessageHeader header, CancellationToken token)
+        PipeAsyncMessageHeader header, CancellationToken cancellation)
     {
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _headerBuffer, _stream, token);
-            await pipeStream.WriteGuid(header.MessageId, token);
-            await pipeStream.WriteString(header.ReplyPipe, token);
+            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _headerBuffer, _stream, cancellation);
+            await pipeStream.WriteGuid(header.MessageId, cancellation);
+            await pipeStream.WriteString(header.ReplyPipe, cancellation);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-        await WaitAcknowledge(header.MessageId, token);
+        await WaitAcknowledge(header.MessageId, cancellation);
     }
 
     public async Task EndTransferMessage(
-        Guid messageId, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken token)
+        Guid messageId, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_contentBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _contentBuffer, _stream, token);
-            await writeFunc.Invoke(pipeStream, token);
+            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _contentBuffer, _stream, cancellation);
+            await writeFunc.Invoke(pipeStream, cancellation);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-        await WaitAcknowledge(messageId, token);
+        await WaitAcknowledge(messageId, cancellation);
     }
 
     public async Task TransferMessage(
-        PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken token)
+        PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
-        await BeginTransferMessage(header, token);
-        await EndTransferMessage(header.MessageId, writeFunc, token);
+        await BeginTransferMessage(header, cancellation);
+        await EndTransferMessage(header.MessageId, writeFunc, cancellation);
     }
 
     public async Task<PipeMessageHeader> BeginReceiveMessage(
-        Action<Guid> onAcceptAction, CancellationToken token)
+        Action<Guid> onAcceptAction, CancellationToken cancellation)
     {
         var message = new PipeMessageHeader();
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, token);
+            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, cancellation);
             if (await pipeStream.ReadTransaction(
                 new Func<PipeChunkReadStream, Task<bool>>[] 
                 {
-                    s => s.TryReadGuid(val => message.MessageId = val, token)
+                    s => s.TryReadGuid(val => message.MessageId = val, cancellation)
                 }
             ))
             {
                 onAcceptAction?.Invoke(message.MessageId);
-                await SendAcknowledge(message.MessageId, true, token);
+                await SendAcknowledge(message.MessageId, true, cancellation);
                 return message;
             }
         }
@@ -103,23 +103,23 @@ public class PipeProtocol
     }
 
     public async Task<PipeAsyncMessageHeader> BeginReceiveMessageAsync(
-        Action<Guid, string> onAcceptAction, CancellationToken token)
+        Action<Guid, string> onAcceptAction, CancellationToken cancellation)
     {
         var message = new PipeAsyncMessageHeader();
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, token);
+            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, cancellation);
             if (await pipeStream.ReadTransaction(
                 new Func<PipeChunkReadStream, Task<bool>>[] 
                 {
-                    s => s.TryReadGuid(val => message.MessageId = val, token),
-                    s => s.TryReadString(val => message.ReplyPipe = val, token)
+                    s => s.TryReadGuid(val => message.MessageId = val, cancellation),
+                    s => s.TryReadString(val => message.ReplyPipe = val, cancellation)
                 }
             ))
             {
                 onAcceptAction?.Invoke(message.MessageId, message.ReplyPipe);
-                await SendAcknowledge(message.MessageId, true, token);
+                await SendAcknowledge(message.MessageId, true, cancellation);
                 return message;
             }
         }
@@ -131,34 +131,34 @@ public class PipeProtocol
     }
 
     public async Task<T> EndReceiveMessage<T>(
-        Guid messageId, Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken token)
+        Guid messageId, Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
         T message;
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_contentBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _contentBuffer, _stream, token);
-            message = await readFunc.Invoke(pipeStream, token);
+            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _contentBuffer, _stream, cancellation);
+            message = await readFunc.Invoke(pipeStream, cancellation);
         }
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
-            await SendAcknowledge(messageId, true, token);
+            await SendAcknowledge(messageId, true, cancellation);
         }        
         return message;
     }
 
     public async Task<T> ReceiveMessage<T>(
-        Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken token)
+        Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
-        var header = await BeginReceiveMessage(null, token);
+        var header = await BeginReceiveMessage(null, cancellation);
         if (header != null)
-            return await EndReceiveMessage(header.MessageId, readFunc, token);
+            return await EndReceiveMessage(header.MessageId, readFunc, cancellation);
         return default;
     }
 
     private async Task WaitAcknowledge(
-        Guid messageId, CancellationToken token)
+        Guid messageId, CancellationToken cancellation)
     {
         Guid messageIdReceived;
         bool ackReceived;
@@ -166,13 +166,13 @@ public class PipeProtocol
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, token);
+            await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, cancellation);
             ackReceived = false;
             var messageRead = await pipeStream.ReadTransaction(
                 new Func<PipeChunkReadStream, Task<bool>>[] 
                 {
-                    s => s.TryReadGuid(val => messageIdReceived = val, token),
-                    s => s.TryReadBoolean(val => ackReceived = val, token)
+                    s => s.TryReadGuid(val => messageIdReceived = val, cancellation),
+                    s => s.TryReadBoolean(val => ackReceived = val, cancellation)
                 }
             );
             ackReceived = ackReceived && messageRead;
@@ -190,14 +190,14 @@ public class PipeProtocol
     }
 
     private async Task SendAcknowledge(
-        Guid messageId, bool ack, CancellationToken token)
+        Guid messageId, bool ack, CancellationToken cancellation)
     {
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
-            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _headerBuffer, _stream, token);
-            await pipeStream.WriteGuid(messageId, token);
-            await pipeStream.WriteBoolean(ack, token);
+            await using var pipeStream = new PipeChunkWriteStream(chunkBuffer, _headerBuffer, _stream, cancellation);
+            await pipeStream.WriteGuid(messageId, cancellation);
+            await pipeStream.WriteBoolean(ack, cancellation);
         }
         finally
         {

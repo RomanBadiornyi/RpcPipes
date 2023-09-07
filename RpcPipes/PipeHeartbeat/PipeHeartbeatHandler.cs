@@ -13,8 +13,8 @@ public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
 
     public bool StartMessageHandling(Guid messageId, CancellationToken token, IPipeHeartbeatReporter heartbeatReporter)
     {
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        return messageHandleByMessageId.TryAdd(messageId, (heartbeatReporter as IPipeHeartbeatReporter<TOut>, cts));
+        var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(token);
+        return messageHandleByMessageId.TryAdd(messageId, (heartbeatReporter as IPipeHeartbeatReporter<TOut>, cancellationSource));
     }
 
     public void StartMessageExecute(Guid messageId, object message)
@@ -22,14 +22,14 @@ public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
         _messageByMessageId.TryAdd(messageId, message);
     }
 
-    public bool TryGetMessageCancellation(Guid messageId, out CancellationTokenSource token)
+    public bool TryGetMessageCancellation(Guid messageId, out CancellationTokenSource cancellation)
     {
         if (messageHandleByMessageId.TryGetValue(messageId, out var handle))
         {
-            token = handle.Cancellation;
+            cancellation = handle.Cancellation;
             return true;
         }
-        token = null;
+        cancellation = null;
         return false;
     }    
 

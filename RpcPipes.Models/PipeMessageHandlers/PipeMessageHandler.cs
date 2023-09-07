@@ -9,11 +9,11 @@ public class PipeMessageHandler :
 {
     private readonly ConcurrentDictionary<object, (DateTime Started, TimeSpan Delay)> _handlingMessages = new();
     
-    public async Task<ReplyMessage> HandleRequest(RequestMessage message, CancellationToken token)
+    public async Task<ReplyMessage> HandleRequest(RequestMessage message, CancellationToken cancellation)
     {
         _handlingMessages.TryAdd(message, (DateTime.Now, TimeSpan.FromSeconds(message.DelaySeconds)));
         if (message.DelaySeconds > 0)
-            await Task.Delay(TimeSpan.FromSeconds(message.DelaySeconds), token);
+            await Task.Delay(TimeSpan.FromSeconds(message.DelaySeconds), cancellation);
         var reply = new ReplyMessage(message.Message);
         _handlingMessages.TryRemove(message, out _);
         return reply;

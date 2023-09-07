@@ -12,7 +12,6 @@ internal class PipeRequestOutHandler
     private static Counter<int> _sentMessagesCounter = _meter.CreateCounter<int>("sent-messages");
 
     private ILogger _logger;
-    private CancellationTokenSource _cancellation;
     
     private PipeConnectionManager _connectionPool;
 
@@ -21,11 +20,10 @@ internal class PipeRequestOutHandler
     public string PipeName { get; }
     public Task[] ChannelTasks => _requestChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray();
 
-    public PipeRequestOutHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool, CancellationTokenSource cancellation)
+    public PipeRequestOutHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool)
     {
         _logger = logger;
         _connectionPool = connectionPool;
-        _cancellation = cancellation;
         PipeName = pipeName;
     }
 
@@ -36,7 +34,7 @@ internal class PipeRequestOutHandler
             MessageChannels = _requestChannels,
             Message = requestMessage
         };
-        _connectionPool.ProcessClientMessage(PipeName, messageQueueRequest, InvokeHandleSendMessage, _cancellation.Token);
+        _connectionPool.ProcessClientMessage(PipeName, messageQueueRequest, InvokeHandleSendMessage);
 
         Task InvokeHandleSendMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
             => HandleSendMessage(onMessageSend, requestMessage, protocol, cancellation);
@@ -45,15 +43,19 @@ internal class PipeRequestOutHandler
 
     private async Task HandleSendMessage(Action<PipeClientRequestMessage> onMessageSend, PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
-        using var sendCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellation, requestMessage.RequestCancellation.Token);
         try
         {
-            await requestMessage.SendAction.Invoke(protocol, sendCancellation.Token);
-
+            requestMessage.RequestCancellation.Token.ThrowIfCancellationRequested();
+            //if we get to this point and request not cancelled we send message to server without interruption by passing global cancellation.
+            await requestMessage.SendAction.Invoke(protocol, cancellation);
             _sentMessagesCounter.Add(1);
             onMessageSend.Invoke(requestMessage);
             _logger.LogDebug("sent message {MessageId} for execution", requestMessage.Id);
-
+        }
+        catch (OperationCanceledException)
+        {
+            requestMessage.ReceiveTask.TrySetCanceled();
+            return;
         }
         catch (Exception e)
         {

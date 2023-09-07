@@ -14,7 +14,6 @@ internal class PipeRequestInHandler
     private static Counter<int> _handledMessagesCounter = _meter.CreateCounter<int>("handled-messages");
 
     private ILogger _logger;
-    private CancellationTokenSource _cancellation;
     private PipeConnectionManager _connectionPool;
     private IPipeHeartbeatHandler _heartbeatHandler;
 
@@ -24,20 +23,17 @@ internal class PipeRequestInHandler
         ILogger logger,
         string pipeName,
         PipeConnectionManager connectionPool,
-        IPipeHeartbeatHandler heartbeatHandler,
-        CancellationTokenSource cancellation)
+        IPipeHeartbeatHandler heartbeatHandler)
     {
         _logger = logger;
         _connectionPool = connectionPool;
         _heartbeatHandler = heartbeatHandler;
-        _cancellation = cancellation;
-
         PipeName = pipeName;
     }
 
     public Task Start(IPipeHeartbeatReporter heartbeatReporter, Func<PipeServerRequestMessage, bool> setupRequest)
     {
-        return _connectionPool.ProcessServerMessages(PipeName, ReceiveMessage, _cancellation.Token);
+        return _connectionPool.ProcessServerMessages(PipeName, ReceiveMessage);
 
         Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
             => HandleReceiveMessage(heartbeatReporter, setupRequest, protocol, cancellation);
@@ -52,7 +48,7 @@ internal class PipeRequestInHandler
                 //ensure we add current request to outstanding messages before we complete reading request payload
                 //this way we ensure that when client starts doing heartbeat calls - we already can reply as we know about this message
                 requestMessage = new PipeServerRequestMessage(id, reply);
-                if (!_heartbeatHandler.StartMessageHandling(requestMessage.Id, _cancellation.Token, heartbeatReporter))
+                if (!_heartbeatHandler.StartMessageHandling(requestMessage.Id, cancellation, heartbeatReporter))
                     requestMessage = null;
                 else
                     setupRequest.Invoke(requestMessage);
@@ -77,8 +73,7 @@ internal class PipeRequestInHandler
         {
             _pendingMessagesCounter.Add(-1);
             _activeMessagesCounter.Add(1);
-            if (!_heartbeatHandler.TryGetMessageCancellation(requestMessage.Id, out var requestCancellation))
-                requestCancellation = _cancellation;
+            _heartbeatHandler.TryGetMessageCancellation(requestMessage.Id, out var requestCancellation);
             try
             {
                 await requestMessage.RunRequest.Invoke(requestCancellation);

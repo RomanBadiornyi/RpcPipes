@@ -11,7 +11,6 @@ internal class PipeHeartbeatOutHandler<TP>
     where TP: IPipeHeartbeat
 {
     private ILogger _logger;
-    private CancellationTokenSource _cancellation;
 
     private PipeConnectionManager _connectionPool;
     private IPipeMessageWriter _messageWriter;
@@ -22,16 +21,12 @@ internal class PipeHeartbeatOutHandler<TP>
     public string PipeName { get; }
     public Task[] ChannelTasks => _heartBeatsChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray();
 
-    public PipeHeartbeatOutHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool, IPipeHeartbeatReceiver<TP> heartbeatReceiver, IPipeMessageWriter messageWriter, CancellationTokenSource cancellation)
+    public PipeHeartbeatOutHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool, IPipeHeartbeatReceiver<TP> heartbeatReceiver, IPipeMessageWriter messageWriter)
     {
         _logger = logger;
-
         _connectionPool = connectionPool;
         _messageWriter = messageWriter;
         _heartbeatReceiver = heartbeatReceiver;
-
-        _cancellation = cancellation;
-
         PipeName = pipeName;
     }
 
@@ -42,7 +37,7 @@ internal class PipeHeartbeatOutHandler<TP>
             MessageChannels = _heartBeatsChannels,
             Message = heartbeatMessage
         };
-        _connectionPool.ProcessClientMessage(PipeName, messageQueueRequest, HandleHeartbeatMessage, _cancellation.Token);
+        _connectionPool.ProcessClientMessage(PipeName, messageQueueRequest, HandleHeartbeatMessage);
     }
 
     private async Task HandleHeartbeatMessage(
@@ -117,10 +112,10 @@ internal class PipeHeartbeatOutHandler<TP>
             heartbeatMessage.RequestCancellation.Cancel();
         }
 
-        Task WriteHeartbeat(Stream stream, CancellationToken token)
-            => _messageWriter.WriteData(pipeHeartbeatRequest, stream, token);
+        Task WriteHeartbeat(Stream stream, CancellationToken cancellation)
+            => _messageWriter.WriteData(pipeHeartbeatRequest, stream, cancellation);
 
-        ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken token)
-            => _messageWriter.ReadData<TP>(stream, token);
+        ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken cancellation)
+            => _messageWriter.ReadData<TP>(stream, cancellation);
     }
 }

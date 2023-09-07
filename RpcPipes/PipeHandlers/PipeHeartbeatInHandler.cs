@@ -10,7 +10,6 @@ internal class PipeHeartbeatInHandler
     private ILogger _logger;
     private PipeConnectionManager _connectionPool;
     private IPipeMessageWriter _messageWriter;
-    private CancellationTokenSource _cancellation;
 
     public string PipeName { get; }
 
@@ -18,20 +17,18 @@ internal class PipeHeartbeatInHandler
         ILogger logger,
         string pipeName,
         PipeConnectionManager connectionPool,
-        IPipeMessageWriter messageWriter,
-        CancellationTokenSource cancellation)
+        IPipeMessageWriter messageWriter)
     {
         _logger = logger;
         _connectionPool = connectionPool;
         _messageWriter = messageWriter;
-        _cancellation = cancellation;
         PipeName = pipeName;
     }
 
     public Task Start<TP>(IPipeHeartbeatHandler<TP> heartbeatHandler)
         where TP: IPipeHeartbeat
     {
-        return _connectionPool.ProcessServerMessages(PipeName, HeartbeatMessage, _cancellation.Token);
+        return _connectionPool.ProcessServerMessages(PipeName, HeartbeatMessage);
 
         Task HeartbeatMessage(PipeProtocol protocol, CancellationToken cancellation)
             => HandleHeartbeatMessage(heartbeatHandler, protocol, cancellation);
@@ -69,10 +66,10 @@ internal class PipeHeartbeatInHandler
             await protocol.TransferMessage(heartbeatHeader, WriteHeartbeat, cancellation);
         }
 
-        ValueTask<PipeRequestHeartbeat> ReadHeartbeat(Stream stream, CancellationToken token)
-            => _messageWriter.ReadData<PipeRequestHeartbeat>(stream, token);
+        ValueTask<PipeRequestHeartbeat> ReadHeartbeat(Stream stream, CancellationToken cancellation)
+            => _messageWriter.ReadData<PipeRequestHeartbeat>(stream, cancellation);
 
-        Task WriteHeartbeat(Stream stream, CancellationToken token)
-            => _messageWriter.WriteData(pipeHeartbeat, stream, token);
+        Task WriteHeartbeat(Stream stream, CancellationToken cancellation)
+            => _messageWriter.WriteData(pipeHeartbeat, stream, cancellation);
     }
 }

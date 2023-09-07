@@ -14,9 +14,9 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     private long _bufferPosition;
 
     private readonly Stream _networkStream;
-    private readonly CancellationToken _cancellationToken;
+    private readonly CancellationToken _cancellation;
 
-    public PipeChunkWriteStream(byte[] buffer, int bufferLength, Stream networkStream, CancellationToken cancellationToken)
+    public PipeChunkWriteStream(byte[] buffer, int bufferLength, Stream networkStream, CancellationToken cancellation)
     {
         if (buffer.Length > 0)
             buffer[0] = 0;
@@ -26,23 +26,23 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         _bufferPosition = _bufferReserved;
 
         _networkStream = networkStream;
-        _cancellationToken = cancellationToken;
+        _cancellation = cancellation;
     }
 
-    public Task WriteGuid(Guid id, CancellationToken token)
-        => WriteAsync(id.ToByteArray(), 0, 16, token);
+    public Task WriteGuid(Guid id, CancellationToken cancellation)
+        => WriteAsync(id.ToByteArray(), 0, 16, cancellation);
 
-    public Task WriteBoolean(bool val, CancellationToken token)
-        => WriteAsync(BitConverter.GetBytes(val), 0, sizeof(bool), token);
+    public Task WriteBoolean(bool val, CancellationToken cancellation)
+        => WriteAsync(BitConverter.GetBytes(val), 0, sizeof(bool), cancellation);
 
-    public Task WriteInteger32(int val, CancellationToken token)
-        => WriteAsync(BitConverter.GetBytes(val), 0, sizeof(int), token);
+    public Task WriteInteger32(int val, CancellationToken cancellation)
+        => WriteAsync(BitConverter.GetBytes(val), 0, sizeof(int), cancellation);
 
-    public async Task WriteString(string message, CancellationToken token)
+    public async Task WriteString(string message, CancellationToken cancellation)
     {
         var buffer = Encoding.UTF8.GetBytes(message);
-        await WriteAsync(BitConverter.GetBytes(buffer.Length), 0, 4, token);
-        await WriteAsync(buffer, 0, buffer.Length, token);
+        await WriteAsync(BitConverter.GetBytes(buffer.Length), 0, 4, cancellation);
+        await WriteAsync(buffer, 0, buffer.Length, cancellation);
     }    
 
     public override void Write(byte[] buffer, int offset, int count)
@@ -68,7 +68,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         }
     }
 
-    public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    public override async Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellation)
     {
         if (_closed)
             throw new ObjectDisposedException("stream already disposed");
@@ -87,7 +87,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
             bufferWriteTotal += bufferWriteCount;            
 
             if (_bufferPosition == _bufferLength)
-                await FlushAsync(cancellationToken);
+                await FlushAsync(cancellation);
         }
     }
 
@@ -101,13 +101,13 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         _bufferPosition = _bufferReserved;
     }
 
-    public override async Task FlushAsync(CancellationToken cancellationToken)
+    public override async Task FlushAsync(CancellationToken cancellation)
     {
         if (_closed)
             return;
         var flushedBytes = _bufferPosition - _bufferReserved;
         SetFlushedLength(_buffer, _closing, (int)flushedBytes);
-        await _networkStream.WriteAsync(_buffer, 0, (int)_bufferPosition, cancellationToken);
+        await _networkStream.WriteAsync(_buffer, 0, (int)_bufferPosition, cancellation);
         _bufferPosition = _bufferReserved;
     }
 
@@ -125,7 +125,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _closing = true;
-        await FlushAsync(_cancellationToken);
+        await FlushAsync(_cancellation);
         _closed = true;
         _closing = false;
     }
@@ -135,7 +135,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
         throw new NotSupportedException("Read operation is not supported");
     }
 
-    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellation)
     {
         throw new NotSupportedException("ReadAsync operation is not supported");        
     }

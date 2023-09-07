@@ -13,21 +13,19 @@ internal class PipeReplyInHandler
     private ILogger _logger;
     
     private PipeConnectionManager _connectionPool;
-    private CancellationTokenSource _cancellation;
 
     public string PipeName { get; }
 
-    public PipeReplyInHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool, CancellationTokenSource cancellation)
+    public PipeReplyInHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool)
     {
         _logger = logger;
         _connectionPool = connectionPool;
-        _cancellation = cancellation;
         PipeName = pipeName;
     }
 
     public Task Start(Func<Guid, PipeClientRequestMessage> requestProvider)
     {
-        return _connectionPool.ProcessServerMessages(PipeName, ReceiveMessage, _cancellation.Token);
+        return _connectionPool.ProcessServerMessages(PipeName, ReceiveMessage);
 
         Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
             => HandleReceiveMessage(requestProvider, protocol, cancellation);
@@ -40,10 +38,10 @@ internal class PipeReplyInHandler
             .BeginReceiveMessage(id => { requestMessage = TryMarkMessageAsCompleted(id, requestProvider); }, cancellation);
         if (header != null && requestMessage != null)
         {
-            await requestMessage.HeartbeatCheckHandle.WaitAsync(requestMessage.RequestCancellation.Token);
+            await requestMessage.HeartbeatCheckHandle.WaitAsync(cancellation);
             try
             {
-                await ReceiveMessage(requestMessage, protocol);   
+                await ReceiveMessage(requestMessage, protocol, cancellation);   
             }
             finally
             {
@@ -68,11 +66,11 @@ internal class PipeReplyInHandler
         return requestMessage;
     }
 
-    private async Task ReceiveMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol)
+    private async Task ReceiveMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
         try
         {
-            await requestMessage.ReceiveAction.Invoke(protocol, requestMessage.RequestCancellation.Token);
+            await requestMessage.ReceiveAction.Invoke(protocol, cancellation);
             requestMessage.ReceiveTask.TrySetResult(true);
         }
         catch (OperationCanceledException)

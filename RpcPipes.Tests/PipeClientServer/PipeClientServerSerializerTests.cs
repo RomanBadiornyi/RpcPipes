@@ -17,9 +17,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, serverStop.Token);
+        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
@@ -31,8 +29,8 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             Assert.That(exception.Message, Does.Contain("deserialize server error"));
         }
 
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
     }
 
     [Test]
@@ -44,9 +42,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         
         var clientId = $"TestPipe.{Guid.NewGuid()}";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
-
-        var serverStop = new CancellationTokenSource();
-        var serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, serverStop.Token);
+        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, serializer))
@@ -58,7 +54,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
             Assert.That(exception.Message, Does.Contain("deserialize client error"));
         }
 
-        serverStop.Cancel();
-        await serverTask;
+        _serverStop.Cancel();
+        await _serverTask;
     }  
 }

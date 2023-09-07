@@ -24,6 +24,7 @@ public class PipeTransportServer
     private ILogger<PipeTransportServer> _logger;
     private string _receivePipe;
     private string _heartbeatPipe;
+    private int _instances;
     private IPipeMessageWriter _messageWriter;
 
     private readonly object _sync = new();
@@ -43,8 +44,8 @@ public class PipeTransportServer
         _logger = logger;
         _receivePipe = receivePipe;
         _heartbeatPipe = heartbeatPipe;
+        _instances = instances;
         _messageWriter = messageWriter;
-        ConnectionPool = new PipeConnectionManager(logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough);        
     }
 
     public Task Start<TReq, TRep, TP>(
@@ -61,17 +62,19 @@ public class PipeTransportServer
             _serverTaskCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
 
             var requests = new ConcurrentDictionary<Guid, RequestResponse<TReq, TRep>>();
+            ConnectionPool = new PipeConnectionManager(
+                _logger, _meter, _instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _serverTaskCancellation.Token);        
 
             HeartbeatIn = new PipeHeartbeatInHandler(
-                _logger, _heartbeatPipe, ConnectionPool, _messageWriter, _serverTaskCancellation);
+                _logger, _heartbeatPipe, ConnectionPool, _messageWriter);
             RequestIn = new PipeRequestInHandler(
-                _logger, _receivePipe, ConnectionPool, heartbeatHandler, _serverTaskCancellation);
+                _logger, _receivePipe, ConnectionPool, heartbeatHandler);
             ReplyOut = new PipeReplyOutHandler(
-                _logger, ConnectionPool, heartbeatHandler, _serverTaskCancellation);
+                _logger, ConnectionPool, heartbeatHandler);
 
             _serverTask = Task
                 .WhenAll(
-                    RequestIn.Start(messageHandler as IPipeHeartbeatReporter, r => SetupRequest(r, requests, messageHandler, heartbeatHandler)),
+                    RequestIn.Start(messageHandler as IPipeHeartbeatReporter, SetupRequestCallbacks),
                     HeartbeatIn.Start(heartbeatHandler)
                 )
                 //wait also until we complete all client connections
@@ -79,6 +82,9 @@ public class PipeTransportServer
 
             _started = true;
             return _serverTask;
+
+            bool SetupRequestCallbacks(PipeServerRequestMessage request)
+                => SetupRequest(request, requests, messageHandler, heartbeatHandler);
         }
     }
 
@@ -156,11 +162,11 @@ public class PipeTransportServer
         ReplyOut.PublishResponseMessage(requestContainer.Handle);
     }
 
-    private async Task SendRequest<TReq, TRep>(RequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken token)
+    private async Task SendRequest<TReq, TRep>(RequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
     {
         _logger.LogDebug("sending reply for message {MessageId} back to client", requestContainer.Handle.Id);
         var pipeMessageHeader = new PipeMessageHeader { MessageId = requestContainer.Handle.Id };
-        await protocol.TransferMessage(pipeMessageHeader, Write, token);
+        await protocol.TransferMessage(pipeMessageHeader, Write, cancellation);
         _logger.LogDebug("sent reply for message {MessageId} back to client", requestContainer.Handle.Id);
 
        Task Write(Stream stream, CancellationToken cancellation)

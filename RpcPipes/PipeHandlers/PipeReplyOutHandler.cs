@@ -13,7 +13,6 @@ internal class PipeReplyOutHandler
     private static Counter<int> _replyMessagesCounter = _meter.CreateCounter<int>("reply-messages");
     
     private ILogger _logger;
-    private CancellationTokenSource _cancellation;
 
     private PipeConnectionManager _connectionPool;
     private IPipeHeartbeatHandler _heartbeatHandler;
@@ -25,13 +24,11 @@ internal class PipeReplyOutHandler
     public PipeReplyOutHandler(
         ILogger logger, 
         PipeConnectionManager connectionPool,
-        IPipeHeartbeatHandler heartbeatHandler, 
-        CancellationTokenSource cancellation)
+        IPipeHeartbeatHandler heartbeatHandler)
     {
         _logger = logger;
         _connectionPool = connectionPool;
         _heartbeatHandler = heartbeatHandler;
-        _cancellation = cancellation;
     }
 
     public void PublishResponseMessage(PipeServerRequestMessage requestMessage)
@@ -43,18 +40,18 @@ internal class PipeReplyOutHandler
             MessageChannels = _responseChannels, 
             Message = requestMessage 
         };
-        _connectionPool.ProcessClientMessage(requestMessage.ReplyPipe, messageQueueRequest, InvokeSendResponse, _cancellation.Token);
+        _connectionPool.ProcessClientMessage(requestMessage.ReplyPipe, messageQueueRequest, InvokeSendResponse);
 
         Task InvokeSendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
             => SendResponse(requestMessage, protocol, cancellation);
     }
 
-    private async Task SendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken token)
+    private async Task SendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
         _replyMessagesCounter.Add(-1);
         try
         {
-            await requestMessage.SendResponse.Invoke(protocol, token);            
+            await requestMessage.SendResponse.Invoke(protocol, cancellation);            
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
             requestMessage.OnMessageCompleted.Invoke(null, true);
         }
