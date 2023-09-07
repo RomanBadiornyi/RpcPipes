@@ -25,7 +25,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
@@ -46,7 +46,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 10);
             var requestContext = new PipeRequestContext { Deadline = TimeSpan.FromMilliseconds(10) };
             var exception = Assert.ThrowsAsync<PipeServerException>(() =>
@@ -74,7 +74,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 10);
             var cts = new CancellationTokenSource();
             cts.CancelAfter(TimeSpan.FromMilliseconds(10));
@@ -105,7 +105,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));                        
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);                        
             pipeClient.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);            
             pipeServer.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
             
@@ -169,7 +169,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
@@ -178,7 +178,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
@@ -201,7 +201,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
                 _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
             {
-                pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+                pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
                 var request = new RequestMessage($"{i}", 0);
                 var requestContext = new PipeRequestContext();
                 using var tokenSource = new CancellationTokenSource();
@@ -242,7 +242,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var requestContext = new PipeRequestContext
             {
                 Heartbeat = TimeSpan.FromMilliseconds(10)
@@ -280,7 +280,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {          
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));  
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);  
             var requestContext = new PipeRequestContext 
             {
                 Heartbeat = TimeSpan.FromMilliseconds(10)
@@ -309,7 +309,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
-            pipeClient.Cancellation.CancelAfter(TimeSpan.FromSeconds(10));
+            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeServerException>(

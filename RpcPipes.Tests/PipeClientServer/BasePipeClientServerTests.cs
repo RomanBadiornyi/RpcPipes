@@ -7,12 +7,15 @@ using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
-using NSubstitute.Routing.AutoValues;
+using NUnit.Framework.Internal;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
 public class BasePipeClientServerTests
 {
+    protected TimeSpan _clientRequestTimeout = TimeSpan.FromSeconds(60);
+    protected TimeSpan _serverTimeout = TimeSpan.FromSeconds(60);
+    
     private ServiceProvider _serviceProvider;
 
     protected Dictionary<string, int> _messages;
@@ -48,6 +51,7 @@ public class BasePipeClientServerTests
             }).BuildServiceProvider();
         _clientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
         _serverLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
+        _clientLogger.LogInformation("start running test {TestCase}", TestContext.CurrentContext.Test.FullName);
     }
 
     [TearDown]
@@ -141,7 +145,7 @@ public class BasePipeClientServerTests
     {
         //forcefully stop in every test server after 60 seconds in order to prevent tests from hanging in case of unexpected behavior
         _serverStop = new CancellationTokenSource();
-        _serverStop.CancelAfter(TimeSpan.FromSeconds(60));
+        _serverStop.CancelAfter(_serverTimeout);
         _serverTask = Task.CompletedTask;
     }
 
