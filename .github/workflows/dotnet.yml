@@ -31,6 +31,7 @@ jobs:
       run: dotnet test --no-build --verbosity normal --blame-hang-timeout 3m --blame-hang-dump-type mini
     - name: Dumps
       uses: actions/upload-artifact@v3
+      if: failure()
       with:
         name: dumps
         path: /home/runner/work/RpcPipes/**/*.dmp
