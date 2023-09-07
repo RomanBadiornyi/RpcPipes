@@ -6,11 +6,15 @@ using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
 using System.Diagnostics.Metrics;
+using Microsoft.Extensions.DependencyInjection;
+using NSubstitute.Routing.AutoValues;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
 public class BasePipeClientServerTests
 {
+    private ServiceProvider _serviceProvider;
+
     protected Dictionary<string, int> _messages;
     protected Dictionary<string, int> _connections;
     protected MeterListener _meterListener;
@@ -20,25 +24,48 @@ public class BasePipeClientServerTests
 
     protected ILogger<PipeTransportServer> _serverLogger;
     protected ILogger<PipeTransportClient<HeartbeatMessage>> _clientLogger;
+
     protected PipeSerializer _serializer;
     protected PipeMessageHandler _messageHandler;
     protected PipeHeartbeatMessageHandler _heartbeatHandler;
     protected ConcurrentBag<HeartbeatMessage> _heartbeatReplies;
-    protected PipeHeartbeatReceiver _heartbeatMessageReceiver;
+    protected PipeHeartbeatReceiver _heartbeatMessageReceiver;    
+
+    [SetUp]
+    public void SetupLogging()
+    {
+        _serviceProvider = new ServiceCollection()
+            .AddLogging(loggingBuilder => 
+            {
+                loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+                loggingBuilder.AddSimpleConsole(options => 
+                {
+                    options.IncludeScopes = true;
+                    options.SingleLine = true;
+                    options.UseUtcTimestamp = true;
+                    options.TimestampFormat = "u";
+                });
+            }).BuildServiceProvider();
+        _clientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
+        _serverLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
+    }
+
+    [TearDown]
+    public void CleanupLogging()
+    {
+        _serviceProvider.Dispose();
+    }
 
     [SetUp]
     public void Setup()
     {
-        _serverLogger = Substitute.For<ILogger<PipeTransportServer>>();
-        _clientLogger = Substitute.For<ILogger<PipeTransportClient<HeartbeatMessage>>>();
-
         _serializer = new PipeSerializer();
 
         _messageHandler = new PipeMessageHandler();
         _heartbeatHandler = new PipeHeartbeatMessageHandler();
 
         _heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
-        _heartbeatMessageReceiver = new PipeHeartbeatReceiver(_heartbeatReplies);
+        _heartbeatMessageReceiver = new PipeHeartbeatReceiver(_heartbeatReplies);        
     }
 
     [TearDown]

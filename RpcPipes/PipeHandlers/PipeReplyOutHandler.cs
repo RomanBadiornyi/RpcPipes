@@ -92,7 +92,6 @@ internal class PipeReplyOutHandler
         if (requestMessage.Retries >= 3 || !requestMessage.ReportError(e))
         {
             //this means that we were not able to send error back to client, in this case simply drop message
-            _logger.LogError(e, "unhandled error occurred while sending reply for message {MessageId} to the client", requestMessage.Id);
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
             requestMessage.OnMessageCompleted.Invoke(e, false);
         }

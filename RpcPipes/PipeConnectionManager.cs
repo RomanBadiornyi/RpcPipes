@@ -60,7 +60,12 @@ public class PipeConnectionManager
     }
 
     public Task ProcessServerMessages(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
-        => StartServerListener(taskAction: () => RunServerMessageLoop(pipeName, action));
+    {
+        var pipeTasks = Enumerable
+            .Range(0, Instances)
+            .Select(_ => RunServerMessageLoop(pipeName, action));
+        return Task.WhenAll(pipeTasks);
+    }
 
     public void ProcessClientMessage<T>(
         string pipeName,
@@ -86,16 +91,6 @@ public class PipeConnectionManager
                     StartClientMessageLoop(pipeName, messageQueueRequest.MessageChannels, messageChannel, messageDispatch);
             }
         }
-    }
-
-    private Task StartServerListener(Func<Task> taskAction)
-    {
-        var pipeTasks = new List<Task>();
-        for (var i = 0; i < Instances; i++)
-        {
-            pipeTasks.Add(Task.Run(taskAction));
-        }
-        return Task.WhenAll(pipeTasks);
     }
 
     private async Task RunServerMessageLoop(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
@@ -163,8 +158,10 @@ public class PipeConnectionManager
     {
         //after we added item to message channel - start connection tasks which wil connect to client
         //and dispatch all messages from the message channel
-        messageChannel.ChannelTask = StartServerListener(
-            () => RunClientMessageLoop(pipeName, messageChannel.Channel, messageDispatch));
+        var pipeTasks = Enumerable
+            .Range(0, Instances)
+            .Select(_ => RunClientMessageLoop(pipeName, messageChannel.Channel, messageDispatch));
+        messageChannel.ChannelTask = Task.WhenAll(pipeTasks);
 
         //run follow up task to cleanup connection if it is no longer in use or spin out new connections if more messages available
         _ = messageChannel.ChannelTask.ContinueWith(_ =>

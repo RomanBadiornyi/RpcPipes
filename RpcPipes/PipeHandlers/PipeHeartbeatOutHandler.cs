@@ -56,11 +56,6 @@ internal class PipeHeartbeatOutHandler<TP>
             if (!heartbeatMessage.RequestCompleted)
                 await DoHeartbeatAsync(heartbeatMessage, protocol, cancellation);
         }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "unhandled error occurred while requesting heartbeat for message {MessageId}", heartbeatMessage.Id);
-            throw;
-        }
         finally
         {
             heartbeatMessage.HeartbeatCheckHandle.Release();

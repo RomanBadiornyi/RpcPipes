@@ -141,19 +141,11 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     private async Task SendRequest<TReq>(Guid id, PipeMessageRequest<TReq> request, PipeProtocol protocol, CancellationToken cancellation)
     {
-        try
-        {
-            _logger.LogDebug("sending request message {MessageId} to server", id);
-            var header = new PipeAsyncMessageHeader { MessageId = id, ReplyPipe = ReplyIn.PipeName };
-            await protocol.BeginTransferMessageAsync(header, cancellation);
-            await protocol.EndTransferMessage(id, Write, cancellation);
-            _logger.LogDebug("sent request message {MessageId} to server", id);
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "unhandled error occurred while sending request message {MessageId} to server", id);
-            throw;
-        }
+        _logger.LogDebug("sending request message {MessageId} to server", id);
+        var header = new PipeAsyncMessageHeader { MessageId = id, ReplyPipe = ReplyIn.PipeName };
+        await protocol.BeginTransferMessageAsync(header, cancellation);
+        await protocol.EndTransferMessage(id, Write, cancellation);
+        _logger.LogDebug("sent request message {MessageId} to server", id);
 
         Task Write(Stream stream, CancellationToken cancellation)
             => _messageWriter.WriteRequest(request, stream, cancellation);
@@ -161,18 +153,10 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     private async Task<PipeMessageResponse<TRep>> ReadReply<TRep>(Guid id, PipeProtocol protocol, CancellationToken cancellation)
     {
-        try
-        {
-            _logger.LogDebug("receiving reply for message {MessageId} from server", id);
-            var response = await protocol.EndReceiveMessage(id, Read, cancellation);
-            _logger.LogDebug("received reply for message {MessageId} from server", id);
-            return response;
-        }
-        catch (Exception e)
-        {
-            _logger.LogError(e, "unhandled error occurred while receiving reply for message {MessageId} from server", id);
-            throw;
-        }
+        _logger.LogDebug("receiving reply for message {MessageId} from server", id);
+        var response = await protocol.EndReceiveMessage(id, Read, cancellation);
+        _logger.LogDebug("received reply for message {MessageId} from server", id);
+        return response;
 
         ValueTask<PipeMessageResponse<TRep>> Read(Stream stream, CancellationToken cancellation)
             => _messageWriter.ReadResponse<TRep>(stream, cancellation);
