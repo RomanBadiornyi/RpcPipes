@@ -33,4 +33,4 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: dumps
-        path: /tmp/*.dmp      
+        path: /home/runner/work/RpcPipes/**/*.dmp
