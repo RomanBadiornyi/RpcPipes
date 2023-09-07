@@ -28,4 +28,4 @@ jobs:
     - name: Build
       run: dotnet build --no-restore -p:IsCiBuild=true
     - name: Test
-      run: dotnet test --no-build --verbosity normal
+      run: dotnet test --no-build --verbosity normal --blame-hang-timeout 3m
