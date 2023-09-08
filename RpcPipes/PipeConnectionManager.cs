@@ -177,7 +177,7 @@ public class PipeConnectionManager
                     messageChannel.ChannelTask = null;
                     //we are completing connection task here, so check if channel still has active messages
                     //if so - roll out new connection task
-                    if (messageChannel.Channel.Reader.Count > 0)
+                    if (messageChannel.Channel.Reader.Count > 0 && !_cancellation.IsCancellationRequested)
                         StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch);
                     else
                     {

@@ -77,8 +77,16 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         _connectionsTasks = Task
             .WhenAll(ReplyIn.Start(GetRequestMessageById))
             //wait until we complete all client connections
-            .ContinueWith(_ => Task.WhenAll(RequestOut.ChannelTasks), CancellationToken.None)
-            .ContinueWith(_ => Task.WhenAll(HeartbeatOut.ChannelTasks), CancellationToken.None);
+            .ContinueWith(async _ => {                
+                _logger.LogDebug("complete {Count} request connections", RequestOut.ChannelTasks.Length);
+                await Task.WhenAll(RequestOut.ChannelTasks);
+                _logger.LogDebug("completed {Count} request connections", RequestOut.ChannelTasks.Length);
+            }, CancellationToken.None)
+            .ContinueWith(async _ => {
+                _logger.LogDebug("complete {Count} heartbeat connections", HeartbeatOut.ChannelTasks.Length);
+                await Task.WhenAll(HeartbeatOut.ChannelTasks);
+                _logger.LogDebug("completed {Count} heartbeat connections", HeartbeatOut.ChannelTasks.Length);
+            }, CancellationToken.None);
 
         PipeClientRequestMessage GetRequestMessageById(Guid id)
         {
