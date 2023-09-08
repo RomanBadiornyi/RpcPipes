@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
-using NSubstitute;
 using RpcPipes.Models;
 using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
-using NUnit.Framework.Internal;
+using RpcPipes.Tests.Logging;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
@@ -25,7 +24,8 @@ public class BasePipeClientServerTests
     protected CancellationTokenSource _serverStop;
     protected Task _serverTask;
 
-    protected ILogger<PipeTransportServer> _serverLogger;
+    protected ILogger _testsLogger;
+    protected ILogger<PipeTransportServer> _serverLogger;    
     protected ILogger<PipeTransportClient<HeartbeatMessage>> _clientLogger;
 
     protected PipeSerializer _serializer;
@@ -41,27 +41,23 @@ public class BasePipeClientServerTests
             .AddLogging(loggingBuilder => 
             {
                 loggingBuilder.SetMinimumLevel(LogLevel.Trace);
-                loggingBuilder.AddSimpleConsole(options => 
-                {
-                    options.IncludeScopes = true;
-                    options.SingleLine = true;
-                    options.UseUtcTimestamp = true;
-                    options.TimestampFormat = "u";
-                });
+                loggingBuilder.AddNUnitLogger();
             }).BuildServiceProvider();
         _clientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
         _serverLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
-        _clientLogger.LogInformation("start running test {TestCase}", TestContext.CurrentContext.Test.Name);
+        _testsLogger = _serviceProvider.GetRequiredService<ILogger<BasePipeClientServerTests>>();
+        _testsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");        
     }
 
     [TearDown]
     public void CleanupLogging()
-    {
+    {                        
         _serviceProvider.Dispose();
+        _testsLogger.LogInformation($"=== end   {TestContext.CurrentContext.Test.Name} ===");
     }
 
     [SetUp]
-    public void Setup()
+    public void SetupMocks()
     {
         _serializer = new PipeSerializer();
 
@@ -73,7 +69,7 @@ public class BasePipeClientServerTests
     }
 
     [TearDown]
-    public void TearDown()
+    public void CleanupDependencies()
     {
         _heartbeatReplies.Clear();
     }    
@@ -99,13 +95,23 @@ public class BasePipeClientServerTests
         {
             lock(_messages) 
             {
-                if (_messages.ContainsKey($"{instrument.Name}"))
-                    _messages[$"{instrument.Name}"] += measurement;
+                var id = $"{instrument.Name}";
+                if (_messages.TryGetValue(id, out var current))
+                {
+                    var next = current + measurement;                    
+                    _messages[id] = next;
+                    _testsLogger?.LogInformation("metrics {MetricsName} change {From} to {To}", id, current, next);
+                }                
             }
             lock(_connections) 
             {
-                if (_connections.ContainsKey($"{instrument.Meter.Name}.{instrument.Name}"))
-                    _connections[$"{instrument.Meter.Name}.{instrument.Name}"] += measurement;
+                var id = $"{instrument.Meter.Name}.{instrument.Name}";
+                if (_connections.TryGetValue(id, out var current))
+                {
+                    var next = current + measurement;                    
+                    _connections[id] = next;
+                    _testsLogger?.LogInformation("metrics {MetricsName} change {From} to {To}", id, current, next);
+                }
             }            
         }
     } 
@@ -130,11 +136,10 @@ public class BasePipeClientServerTests
             { "PipeTransportServer.server-connections", 0 },
             { "PipeTransportServer.client-connections", 0 }
         };
-
     }
 
     [TearDown]
-    public void StopMetrics()
+    public void CleanupMetrics()
     {        
         _messages.Clear();
         _connections.Clear();
@@ -150,7 +155,7 @@ public class BasePipeClientServerTests
     }
 
     [TearDown]
-    public void StopServer()   
+    public void CleanupServer()   
     {
         if (!_serverStop.IsCancellationRequested)
             _serverStop.Cancel();

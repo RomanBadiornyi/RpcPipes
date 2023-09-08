@@ -86,7 +86,8 @@ public class PipeTransportServer
                     HeartbeatIn.Start(heartbeatHandler)
                 )
                 //wait also until we complete all client connections
-                .ContinueWith(_ => Task.WhenAll(ReplyOut.ChannelTasks), CancellationToken.None);
+                .ContinueWith(_ => Task.WhenAll(ReplyOut.ChannelTasks), CancellationToken.None)
+                .ContinueWith(_ => { _logger.LogDebug("server has been stopped"); }, CancellationToken.None);
 
             _started = true;
             return _connectionsTask;
