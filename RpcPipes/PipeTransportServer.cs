@@ -144,19 +144,19 @@ public class PipeTransportServer
         
         try
         {
-            _logger.LogDebug("handling request for message {MessageId}", requestContainer.Handle.Id);
+            _logger.LogDebug("request execution starts for message {MessageId}", requestContainer.Handle.Id);
             requestCancellation.Token.ThrowIfCancellationRequested();    
             requestContainer.ResponseMessage.Reply = await messageHandler.HandleRequest(requestContainer.RequestMessage.Request, requestCancellation.Token);
-            _logger.LogDebug("handled request for message {MessageId}, sending reply back to client", requestContainer.Handle.Id);
+            _logger.LogDebug("request execution completed for message {MessageId}", requestContainer.Handle.Id);
         }
         catch (OperationCanceledException e)
         {
-            _logger.LogWarning("request execution cancelled for message {MessageId}, notify client", requestContainer.Handle.Id);
+            _logger.LogWarning("request execution was cancelled for message {MessageId}", requestContainer.Handle.Id);
             requestContainer.ResponseMessage.SetRequestException(e);
         }
         catch (Exception e)
         {
-            _logger.LogError(e, "request handler for message {MessageId} thrown unhandled error, sending error back to client", requestContainer.Handle.Id);
+            _logger.LogError(e, "request execution thrown unhandled error for message {MessageId}", requestContainer.Handle.Id);
             requestContainer.ResponseMessage.SetRequestException(e);
         }
         heartbeatHandler.EndMessageExecute(requestContainer.Handle.Id);

@@ -16,7 +16,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.ReadRequest<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageRequest<RequestMessage>>(args => throw new InvalidOperationException("deserialize server error"));
         
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
@@ -42,7 +42,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.ReadResponse<ReplyMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 

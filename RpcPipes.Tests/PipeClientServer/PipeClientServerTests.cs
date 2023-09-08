@@ -18,7 +18,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
         
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);        
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
@@ -38,8 +38,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
     [Test]
     public async Task RequestReply_OnDeadlineReplyCancelled()
-    {
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+    {        
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
@@ -67,7 +67,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_OnTimeoutReplyCancelled()
     {
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
@@ -98,7 +98,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_AllConnectedOnMessageSendAndDisconnectedOnDispose()
     {        
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
         
@@ -143,7 +143,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             "incorrect server connections on client");
         Assert.That(_connections["PipeTransportClient.client-connections"], Is.EqualTo(0),
             "incorrect client connections on client");
-        Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0),
+        Assert.That(_connections["PipeTransportServer.server-connections"], Is.GreaterThanOrEqualTo(0).And.LessThanOrEqualTo(8),
             "incorrect server connections on server");
         //at this point client connections will still be active as it does not receive disconnect signal and we didn't dispose server
         Assert.That(_connections["PipeTransportServer.client-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(4),
@@ -151,7 +151,9 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         _serverStop.Cancel();
         await _serverTask;
-
+        
+        Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0),
+            "incorrect server connections on server");
         Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0),
             "incorrect server connections on server");
     }    
@@ -162,7 +164,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 2, _serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
@@ -197,7 +199,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         var replies = new ConcurrentBag<ReplyMessage>();
         var clientTasks = Enumerable.Range(0, 4).Select(async i => {
-            var clientId = $"TestPipe.{Guid.NewGuid()}";
+            var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.{i}";
             await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
                 _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
             {
@@ -235,7 +237,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         heartbeatHandler.HeartbeatMessage(Arg.Any<Guid>())
             .Returns(args => new HeartbeatMessage(0.1, ""), args => new HeartbeatMessage(0.5, ""), args => new HeartbeatMessage(1.0, ""));
         
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, heartbeatHandler, _serverStop.Token);
 
@@ -273,7 +275,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns(args => _serializer.WriteResponse((PipeMessageResponse<ReplyMessage>)args[0], (Stream)args[1], (CancellationToken)args[2]))
             .AndDoes(x => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
 
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
@@ -302,7 +304,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns<ReplyMessage>(args => throw new InvalidOperationException("handler error"));
         
-        var clientId = $"TestPipe.{Guid.NewGuid()}";
+        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 

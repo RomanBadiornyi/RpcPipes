@@ -144,7 +144,10 @@ public class PipeConnectionManager
             {
                 DisconnectServer(serverPipeStream, pipeName);
                 if (isConnected)
+                {
                     _serverConnectionsCounter.Add(-1);
+                    _logger.LogDebug("disconnected {Type} pipe of stream pipe {Pipe}", "server", pipeName);
+                }
             }
         }
     }
@@ -255,7 +258,10 @@ public class PipeConnectionManager
             {
                 DisconnectClient(clientPipeStream, pipeName);
                 if (isConnected)
+                {
                     _clientConnectionsCounter.Add(-1);
+                    _logger.LogDebug("disconnected {Type} pipe of stream pipe {Pipe}", "client", pipeName);
+                }
             }
         }
     }
@@ -329,7 +335,7 @@ public class PipeConnectionManager
                     server.Disconnect();
             }
             finally
-            {
+            {                
                 server.Dispose();
             }
         }
