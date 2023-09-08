@@ -80,6 +80,10 @@ public class PipeTransportServer
             ReplyOut = new PipeReplyOutHandler(
                 _logger, ConnectionPool, heartbeatHandler);
 
+            _connectionsCancellation.Token.Register(() => 
+            {
+                _logger.LogDebug("stopping server");
+            });
             _connectionsTask = Task
                 .WhenAll(
                     RequestIn.Start(messageHandler as IPipeHeartbeatReporter, SetupRequestCallbacks),

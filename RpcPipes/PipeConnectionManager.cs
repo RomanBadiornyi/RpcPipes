@@ -63,7 +63,8 @@ public class PipeConnectionManager
     {
         var pipeTasks = Enumerable
             .Range(0, Instances)
-            .Select(_ => RunServerMessageLoop(pipeName, action));
+            .Select(_ => RunServerMessageLoop(pipeName, action))
+            .ToArray();
         return Task.WhenAll(pipeTasks);
     }
 
@@ -163,29 +164,30 @@ public class PipeConnectionManager
         //and dispatch all messages from the message channel
         var pipeTasks = Enumerable
             .Range(0, Instances)
-            .Select(_ => RunClientMessageLoop(pipeName, messageChannel.Channel, messageDispatch));
-        messageChannel.ChannelTask = Task.WhenAll(pipeTasks);
-
-        //run follow up task to cleanup connection if it is no longer in use or spin out new connections if more messages available
-        _ = messageChannel.ChannelTask.ContinueWith(_ =>
-        {
-            //lock message channel so no incoming messages can be added to it while we cleaning up
-            lock (messageChannel)
+            .Select(_ => RunClientMessageLoop(pipeName, messageChannel.Channel, messageDispatch))
+            .ToArray();
+        messageChannel.ChannelTask = Task
+            .WhenAll(pipeTasks)
+            //run follow up task to cleanup connection if it is no longer in use or spin out new connections if more messages available
+            .ContinueWith(_ =>
             {
-                messageChannel.ChannelTask = null;
-                //we are completing connection task here, so check if channel still has active messages
-                //if so - roll out new connection task
-                if (messageChannel.Channel.Reader.Count > 0)
-                    StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch);
-                else
+                //lock message channel so no incoming messages can be added to it while we cleaning up
+                lock (messageChannel)
                 {
-                    //and if no new pending messages - mark message channel as completed
-                    //to indicate that we can't longer use it during add operation and remove it from channels collection (e.g. full cleanup)
-                    messageChannels.TryRemove(pipeName, out var _);
-                    messageChannel.Completed = true;
+                    messageChannel.ChannelTask = null;
+                    //we are completing connection task here, so check if channel still has active messages
+                    //if so - roll out new connection task
+                    if (messageChannel.Channel.Reader.Count > 0)
+                        StartClientMessageLoop(pipeName, messageChannels, messageChannel, messageDispatch);
+                    else
+                    {
+                        //and if no new pending messages - mark message channel as completed
+                        //to indicate that we can't longer use it during add operation and remove it from channels collection (e.g. full cleanup)
+                        messageChannels.TryRemove(pipeName, out var _);
+                        messageChannel.Completed = true;
+                    }
                 }
-            }
-        }, CancellationToken.None);
+            }, CancellationToken.None);
     }
 
     private async Task RunClientMessageLoop<T>(string pipeName, Channel<T> queue, Func<T, PipeProtocol, CancellationToken, Task> action)

@@ -177,13 +177,14 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     public void Dispose()
     {
-        _connectionsCancellation.Cancel();
+        _logger.LogDebug("disposing client");
         _connectionsTasks.Wait();
         _logger.LogDebug("client has been disposed");
     }
 
     public async ValueTask DisposeAsync()
     {
+        _logger.LogDebug("disposing client");
         _connectionsCancellation.Cancel();
         await _connectionsTasks;
         _logger.LogDebug("client has been disposed");
