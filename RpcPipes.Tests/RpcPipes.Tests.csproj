@@ -12,5 +12,6 @@
   <ItemGroup>
     <ProjectReference Include="../RpcPipes.Models/RpcPipes.Models.csproj" />
     <ProjectReference Include="../RpcPipes/RpcPipes.csproj" />
+    <ProjectReference Include="../NUnit.Logger/NUnit.Logger.csproj" />    
   </ItemGroup>
 </Project>

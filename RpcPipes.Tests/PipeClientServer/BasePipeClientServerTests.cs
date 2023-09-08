@@ -6,7 +6,7 @@ using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
-using RpcPipes.Tests.Logging;
+using NUnit.Logger;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
@@ -34,46 +34,6 @@ public class BasePipeClientServerTests
     protected ConcurrentBag<HeartbeatMessage> _heartbeatReplies;
     protected PipeHeartbeatReceiver _heartbeatMessageReceiver;    
 
-    [SetUp]
-    public void SetupLogging()
-    {
-        _serviceProvider = new ServiceCollection()
-            .AddLogging(loggingBuilder => 
-            {
-                loggingBuilder.SetMinimumLevel(LogLevel.Trace);
-                loggingBuilder.AddNUnitLogger();
-            }).BuildServiceProvider();
-        _clientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
-        _serverLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
-        _testsLogger = _serviceProvider.GetRequiredService<ILogger<BasePipeClientServerTests>>();
-        _testsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");        
-    }
-
-    [TearDown]
-    public void CleanupLogging()
-    {                        
-        _serviceProvider.Dispose();
-        _testsLogger.LogInformation($"=== end   {TestContext.CurrentContext.Test.Name} ===");
-    }
-
-    [SetUp]
-    public void SetupMocks()
-    {
-        _serializer = new PipeSerializer();
-
-        _messageHandler = new PipeMessageHandler();
-        _heartbeatHandler = new PipeHeartbeatMessageHandler();
-
-        _heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
-        _heartbeatMessageReceiver = new PipeHeartbeatReceiver(_heartbeatReplies);        
-    }
-
-    [TearDown]
-    public void CleanupDependencies()
-    {
-        _heartbeatReplies.Clear();
-    }    
-
     [OneTimeSetUp]
     public void ListenMetrics()
     {
@@ -100,7 +60,7 @@ public class BasePipeClientServerTests
                 {
                     var next = current + measurement;                    
                     _messages[id] = next;
-                    _testsLogger?.LogInformation("metrics {MetricsName} change {From} to {To}", id, current, next);
+                    _testsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
                 }                
             }
             lock(_connections) 
@@ -110,11 +70,51 @@ public class BasePipeClientServerTests
                 {
                     var next = current + measurement;                    
                     _connections[id] = next;
-                    _testsLogger?.LogInformation("metrics {MetricsName} change {From} to {To}", id, current, next);
+                    _testsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
                 }
             }            
         }
-    } 
+    }    
+
+    [SetUp]
+    public void SetupLogging()
+    {
+        _serviceProvider = new ServiceCollection()
+            .AddLogging(loggingBuilder => 
+            {
+                loggingBuilder.SetMinimumLevel(LogLevel.Trace);
+                loggingBuilder.AddNUnitLogger();
+            }).BuildServiceProvider();
+        _clientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
+        _serverLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
+        _testsLogger = _serviceProvider.GetRequiredService<ILogger<BasePipeClientServerTests>>();
+        _testsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");        
+    }
+
+    [TearDown]
+    public void CleanupLogging()
+    {                        
+        _serviceProvider.Dispose();
+        _testsLogger.LogInformation($"=== end   {TestContext.CurrentContext.Test.Name} ===");
+    }
+
+    [SetUp]
+    public void SetupDependencies()
+    {
+        _serializer = new PipeSerializer();
+
+        _messageHandler = new PipeMessageHandler();
+        _heartbeatHandler = new PipeHeartbeatMessageHandler();
+
+        _heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
+        _heartbeatMessageReceiver = new PipeHeartbeatReceiver(_heartbeatReplies);        
+    }
+
+    [TearDown]
+    public void CleanupDependencies()
+    {
+        _heartbeatReplies.Clear();
+    }         
 
     [SetUp]
     public void StartMetrics()

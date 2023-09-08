@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
+using NUnit.Framework;
 
-namespace RpcPipes.Tests.Logging;
+namespace NUnit.Logger;
 
 public sealed class NUnitLogger : ILogger
 {

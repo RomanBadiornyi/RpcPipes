@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
-namespace RpcPipes.Tests.Logging;
+namespace NUnit.Logger;
 
 public sealed class NUnitLoggerProvider : ILoggerProvider
 {

@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
-namespace RpcPipes.Tests.Logging;
+namespace NUnit.Logger;
 
 public static class NUnitLoggerExtensions
 {
