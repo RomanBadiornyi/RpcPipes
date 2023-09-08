@@ -77,16 +77,8 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         _connectionsTasks = Task
             .WhenAll(ReplyIn.Start(GetRequestMessageById))
             //wait until we complete all client connections
-            .ContinueWith(async _ => {                
-                _logger.LogDebug("complete {Count} request connections", RequestOut.ChannelTasks.Length);
-                await Task.WhenAll(RequestOut.ChannelTasks);
-                _logger.LogDebug("completed {Count} request connections", RequestOut.ChannelTasks.Length);
-            }, CancellationToken.None)
-            .ContinueWith(async _ => {
-                _logger.LogDebug("complete {Count} heartbeat connections", HeartbeatOut.ChannelTasks.Length);
-                await Task.WhenAll(HeartbeatOut.ChannelTasks);
-                _logger.LogDebug("completed {Count} heartbeat connections", HeartbeatOut.ChannelTasks.Length);
-            }, CancellationToken.None);
+            .ContinueWith(_ => Task.WhenAll(RequestOut.ChannelTasks), CancellationToken.None).Unwrap()
+            .ContinueWith(_ => Task.WhenAll(HeartbeatOut.ChannelTasks), CancellationToken.None).Unwrap();
 
         PipeClientRequestMessage GetRequestMessageById(Guid id)
         {
@@ -185,14 +177,12 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     public void Dispose()
     {
-        _logger.LogDebug("disposing client");
         _connectionsTasks.Wait();
         _logger.LogDebug("client has been disposed");
     }
 
     public async ValueTask DisposeAsync()
     {
-        _logger.LogDebug("disposing client");
         _connectionsCancellation.Cancel();
         await _connectionsTasks;
         _logger.LogDebug("client has been disposed");
