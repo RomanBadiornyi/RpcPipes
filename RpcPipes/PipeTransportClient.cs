@@ -56,19 +56,19 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
         ConnectionPool = new PipeConnectionManager(
             logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _connectionsCancellation.Token);
-        
+
         //limitation on unix
         const int maxPipeLength = 108;
 
         var sendPipe = $"{pipePrefix}";
         if (sendPipe.Length > maxPipeLength)
-            throw new ArgumentOutOfRangeException($"send pipe {sendPipe} too long, limit is {maxPipeLength}");        
+            throw new ArgumentOutOfRangeException($"send pipe {sendPipe} too long, limit is {maxPipeLength}");
         var heartBeatPipe = $"{pipePrefix}.{"heartbeat"}";
         if (heartBeatPipe.Length > maxPipeLength)
-            throw new ArgumentOutOfRangeException($"send pipe {heartBeatPipe} too long, limit is {maxPipeLength}");        
+            throw new ArgumentOutOfRangeException($"send pipe {heartBeatPipe} too long, limit is {maxPipeLength}");
         var receivePipe = $"{pipePrefix}.{clientId}.receive";
         if (receivePipe.Length > maxPipeLength)
-            throw new ArgumentOutOfRangeException($"send pipe {receivePipe} too long, limit is {maxPipeLength}");        
+            throw new ArgumentOutOfRangeException($"send pipe {receivePipe} too long, limit is {maxPipeLength}");
 
         HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, ConnectionPool, heartbeatReceiver, _messageWriter);
         RequestOut = new PipeRequestOutHandler(logger, sendPipe, ConnectionPool);
@@ -88,20 +88,28 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         }
     }
 
-    public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken token)
+    public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken requestCancellation)
     {
-        var receiveTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var requestTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        //automatically and forcefully cancel request if client got disposed.
+        var heartbeatSync = new SemaphoreSlim(1);
+        //cancel request if cancellation received from heartbeat
+        using var heartbeatCancellation = new CancellationTokenSource();
+        heartbeatCancellation.Token.Register(() =>
+            requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to failed heartbeat")));
+
+        //cancel request if client got disposed.
         using var clientStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(_connectionsCancellation.Token);
-        clientStopCancellation.Token.Register(() => receiveTaskSource.SetCanceled());
+        clientStopCancellation.Token.Register(() =>
+            requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to cancellation of client")));
 
         var requestMessage = new PipeClientRequestMessage(Guid.NewGuid())
         {
+            RequestTask = requestTaskSource,
             RequestCancellation = requestCancellation,
-            ReceiveTask = receiveTaskSource,
-            HeartbeatCheckHandle = new SemaphoreSlim(1),
+
+            HeartbeatCancellation = heartbeatCancellation,
+            HeartbeatCheckHandle = heartbeatSync,
             HeartbeatCheckTime = DateTime.Now,
             HeartbeatCheckFrequency = context.Heartbeat
         };
@@ -132,11 +140,24 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         try
         {
             //async block this task until we notified that request is received
-            await receiveTaskSource.Task;
+            await requestTaskSource.Task;
             _logger.LogDebug("received reply for message {MessageId} from server", requestMessage.Id);
         }
         catch (OperationCanceledException)
         {
+            //if request was cancelled but not market as completed, we need to stop heartbeat task there then.
+            if (!requestMessage.RequestCompleted)
+            {
+                await requestMessage.HeartbeatCheckHandle.WaitAsync(CancellationToken.None);
+                try
+                {
+                    requestMessage.RequestCompleted = true;
+                }
+                finally
+                {
+                    requestMessage.HeartbeatCheckHandle.Release();
+                }
+            }
             _logger.LogDebug("cancelled request message {MessageId}", requestMessage.Id);
             throw;
         }

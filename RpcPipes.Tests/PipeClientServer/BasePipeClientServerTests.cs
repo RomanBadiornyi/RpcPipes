@@ -13,8 +13,8 @@ namespace RpcPipes.Tests.PipeClientServer;
 
 public class BasePipeClientServerTests
 {
-    protected TimeSpan _clientRequestTimeout = TimeSpan.MaxValue;
-    protected TimeSpan _serverTimeout = TimeSpan.MaxValue;
+    protected TimeSpan _clientRequestTimeout = TimeSpan.FromDays(1);
+    protected TimeSpan _serverTimeout = TimeSpan.FromDays(1);
     
     private ServiceProvider _serviceProvider;
 

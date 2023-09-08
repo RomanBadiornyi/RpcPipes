@@ -46,21 +46,21 @@ internal class PipeRequestOutHandler
     {
         try
         {
-            requestMessage.RequestCancellation.Token.ThrowIfCancellationRequested();
+            requestMessage.RequestCancellation.ThrowIfCancellationRequested();            
             //if we get to this point and request not cancelled we send message to server without interruption by passing global cancellation.
             await requestMessage.SendAction.Invoke(protocol, cancellation);
             _sentMessagesCounter.Add(1);
             onMessageSend.Invoke(requestMessage);
             _logger.LogDebug("sent message {MessageId} for execution", requestMessage.Id);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException e)
         {
-            requestMessage.ReceiveTask.TrySetCanceled();
+            requestMessage.RequestTask.TrySetException(e);
             return;
         }
         catch (PipeDataException e)
         {
-            requestMessage.ReceiveTask.SetException(e);
+            requestMessage.RequestTask.TrySetException(e);
             return;
         }
         catch (Exception e)
@@ -79,7 +79,7 @@ internal class PipeRequestOutHandler
         }
         else
         {
-            requestMessage.ReceiveTask.TrySetException(e);
+            requestMessage.RequestTask.TrySetException(e);
             _logger.LogError(e, "unable to send message {MessageId} due to error", requestMessage.Id);
         }
     }

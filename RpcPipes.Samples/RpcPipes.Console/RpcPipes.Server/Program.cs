@@ -6,7 +6,7 @@ using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes;
 
 const string receivePipe = "rpc.pipe";
-const int connections = 32;
+const int connections = 50;
 
 var cancellationTokenSource = new CancellationTokenSource();
 

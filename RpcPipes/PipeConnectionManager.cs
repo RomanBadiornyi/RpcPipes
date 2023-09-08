@@ -207,7 +207,7 @@ public class PipeConnectionManager
                     _clientConnectionsCounter.Add(1);
 
                     var protocol = new PipeProtocol(clientPipeStream, HeaderBufferSize, BufferSize);
-                    while (!_cancellation.IsCancellationRequested && clientPipeStream.IsConnected)
+                    while (!_cancellation.IsCancellationRequested && clientPipeStream.IsConnected && !readExpired)
                     {
                         if (!queue.Reader.TryRead(out item))
                         {

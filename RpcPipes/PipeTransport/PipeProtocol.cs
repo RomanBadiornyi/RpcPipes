@@ -33,7 +33,7 @@ public class PipeProtocol
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-        await WaitAcknowledge(header.MessageId, cancellation);
+        await WaitAcknowledge(header.MessageId, false, cancellation);
     }
 
     public async Task BeginTransferMessageAsync(
@@ -50,7 +50,7 @@ public class PipeProtocol
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-        await WaitAcknowledge(header.MessageId, cancellation);
+        await WaitAcknowledge(header.MessageId, false, cancellation);
     }
 
     public async Task EndTransferMessage(
@@ -70,7 +70,7 @@ public class PipeProtocol
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-        await WaitAcknowledge(messageId, cancellation);
+        await WaitAcknowledge(messageId, true, cancellation);
     }
 
     public async Task TransferMessage(
@@ -167,7 +167,7 @@ public class PipeProtocol
     }
 
     private async Task WaitAcknowledge(
-        Guid messageId, CancellationToken cancellation)
+        Guid messageId, bool allowConnectionDrop, CancellationToken cancellation)
     {
         Guid messageIdReceived;
         bool ackReceived;
@@ -192,9 +192,15 @@ public class PipeProtocol
         }        
         if (messageIdReceived == messageId && ackReceived)
             return;
-        if (messageIdReceived == messageId && !ackReceived || messageIdReceived == Guid.Empty)
-            throw new PipeProtocolException($"Server did not acknowledge receiving of request message {messageId}", null);
-
+        //could happen that server receives message and sends ack but before we receive this ack here - 
+        //server drops connection due to various reasons, in this case we will read empty stream
+        //there are 2 main reasons for ack logic:
+        //- is to prevent sending wrong data during BeginSend call 
+        //  which is not the case here, as those pass allowConnectionDrop here)
+        //- is to prevent client from dropping connection after sending data before server fully reads this data 
+        //  which also not the case here as this is server who drops connection, not the client
+        if (messageIdReceived == Guid.Empty && allowConnectionDrop)
+            return;
         throw new PipeProtocolException($"Server did not acknowledge receiving of request message {messageId}, received {messageIdReceived}", null);
     }
 

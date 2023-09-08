@@ -71,15 +71,15 @@ internal class PipeReplyInHandler
         try
         {
             await requestMessage.ReceiveAction.Invoke(protocol, cancellation);
-            requestMessage.ReceiveTask.TrySetResult(true);
+            requestMessage.RequestTask.TrySetResult(true);
         }
         catch (OperationCanceledException)
         {
-            requestMessage.ReceiveTask.TrySetCanceled();
+            requestMessage.RequestTask.TrySetCanceled();
         }
         catch (Exception e)
         {
-            requestMessage.ReceiveTask.TrySetException(e);
+            requestMessage.RequestTask.TrySetException(e);
         }
         finally
         {                

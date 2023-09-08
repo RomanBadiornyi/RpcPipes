@@ -4,7 +4,7 @@ namespace RpcPipes.PipeMessages;
 
 internal class PipeClientRequestMessage : PipeClientHeartbeatMessage
 {
-    public TaskCompletionSource<bool> ReceiveTask { get; set; }
+    public TaskCompletionSource<bool> RequestTask { get; set; }
 
     public Func<PipeProtocol, CancellationToken, Task> SendAction { get; set; }
     public Func<PipeProtocol, CancellationToken, Task> ReceiveAction { get; set; }    

@@ -104,7 +104,7 @@ internal class PipeHeartbeatOutHandler<TP>
         else
         {
             _logger.LogWarning("cancelling execution of request message {MessageId} as it's not handled by the server", heartbeatMessage.Id);
-            heartbeatMessage.RequestCancellation.Cancel();
+            heartbeatMessage.HeartbeatCancellation.Cancel();            
         }
 
         Task WriteHeartbeat(Stream stream, CancellationToken cancellation)
