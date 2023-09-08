@@ -205,10 +205,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
             {
                 pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
                 var request = new RequestMessage($"{i}", 0);
-                var requestContext = new PipeRequestContext();
-                using var tokenSource = new CancellationTokenSource();
-                tokenSource.CancelAfter(TimeSpan.FromSeconds(10));
-                var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, tokenSource.Token);
+                var requestContext = new PipeRequestContext();                
+                var reply = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
                 replies.Add(reply);
             }
         }).ToArray();

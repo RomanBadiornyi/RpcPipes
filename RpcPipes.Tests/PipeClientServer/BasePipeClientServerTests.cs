@@ -1,19 +1,20 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
-using RpcPipes.Models;
+using Microsoft.Extensions.DependencyInjection;
+using NUnit.Logger;
 using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
-using System.Diagnostics.Metrics;
-using Microsoft.Extensions.DependencyInjection;
-using NUnit.Logger;
+using RpcPipes.Models;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
 public class BasePipeClientServerTests
 {
-    protected TimeSpan _clientRequestTimeout = TimeSpan.FromSeconds(60);
-    protected TimeSpan _serverTimeout = TimeSpan.FromSeconds(60);
+    protected TimeSpan _clientRequestTimeout = TimeSpan.MaxValue;
+    protected TimeSpan _serverTimeout = TimeSpan.MaxValue;
     
     private ServiceProvider _serviceProvider;
 
@@ -33,6 +34,17 @@ public class BasePipeClientServerTests
     protected PipeHeartbeatMessageHandler _heartbeatHandler;
     protected ConcurrentBag<HeartbeatMessage> _heartbeatReplies;
     protected PipeHeartbeatReceiver _heartbeatMessageReceiver;    
+
+    [OneTimeSetUp]
+    public void SetupTimeouts()
+    {
+        //if we are not debugging tests - ensure that they don't hang due to deadlocks and enforce client/server to be cancelled after timeout 
+        if (!Debugger.IsAttached)
+        {
+            _clientRequestTimeout = TimeSpan.FromSeconds(60);
+            _serverTimeout = TimeSpan.FromSeconds(60);
+        }
+    }
 
     [OneTimeSetUp]
     public void ListenMetrics()
@@ -147,8 +159,7 @@ public class BasePipeClientServerTests
 
     [SetUp]
     public void SetupServer()   
-    {
-        //forcefully stop in every test server after 60 seconds in order to prevent tests from hanging in case of unexpected behavior
+    {        
         _serverStop = new CancellationTokenSource();
         _serverStop.CancelAfter(_serverTimeout);
         _serverTask = Task.CompletedTask;
@@ -158,7 +169,8 @@ public class BasePipeClientServerTests
     public void CleanupServer()   
     {
         if (!_serverStop.IsCancellationRequested)
-            _serverStop.Cancel();
+            _serverStop.Cancel();        
         _serverTask.Wait();
+        _serverStop.Dispose();
     }
 }
