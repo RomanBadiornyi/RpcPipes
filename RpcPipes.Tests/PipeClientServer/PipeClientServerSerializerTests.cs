@@ -16,12 +16,12 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.ReadRequest<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageRequest<RequestMessage>>(args => throw new InvalidOperationException("deserialize server error"));
         
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
@@ -42,12 +42,12 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
         serializer.ReadResponse<ReplyMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);

@@ -5,8 +5,7 @@ using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes;
 
-const string receivePipe = "TestPipe";
-const string heartbeatPipe = "Heartbeat.TestPipe";
+const string receivePipe = "rpc.pipe";
 const int connections = 32;
 
 var cancellationTokenSource = new CancellationTokenSource();
@@ -29,7 +28,7 @@ var serializer = new PipeSerializer();
 var messageHandler = new PipeMessageHandler();
 var heartbeatHandler = new PipeHeartbeatMessageHandler();
 
-var pipeServer = new PipeTransportServer(logger, receivePipe, heartbeatPipe, connections, serializer);
+var pipeServer = new PipeTransportServer(logger, receivePipe, connections, serializer);
 Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
     e.Cancel = true;
     cancellationTokenSource.Cancel();

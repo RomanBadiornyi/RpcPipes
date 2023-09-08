@@ -7,8 +7,7 @@ using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes;
 
-const string sendPipe = "TestPipe";
-const string heartbeatPipe = "Heartbeat.TestPipe";
+const string sendPipe = "rpc.pipe";
 
 const int connections = 32;
 const int tasks = 250000;
@@ -37,7 +36,7 @@ var heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
 var heartbeatMessageReceiver = new PipeHeartbeatReceiver(heartbeatReplies);
 
 await using (var pipeClient = 
-    new PipeTransportClient<HeartbeatMessage>(logger, sendPipe, heartbeatPipe, $"{sendPipe}.{Guid.NewGuid()}", connections, heartbeatMessageReceiver, serializer)) 
+    new PipeTransportClient<HeartbeatMessage>(logger, sendPipe, $"{Guid.NewGuid()}", connections, heartbeatMessageReceiver, serializer)) 
 {
     var c = pipeClient;
     Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {

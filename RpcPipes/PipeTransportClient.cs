@@ -25,7 +25,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     where TP : IPipeHeartbeat
 {
     private static Meter _meter = new(nameof(PipeTransportClient));
-    private readonly ILogger<PipeTransportClient<TP>> _logger;    
+    private readonly ILogger<PipeTransportClient<TP>> _logger;
 
     private readonly IPipeMessageWriter _messageWriter;
 
@@ -36,16 +36,15 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     internal PipeHeartbeatOutHandler<TP> HeartbeatOut { get; }
     internal PipeRequestOutHandler RequestOut { get; }
-    internal PipeReplyInHandler ReplyIn { get; }    
+    internal PipeReplyInHandler ReplyIn { get; }
 
     public PipeConnectionManager ConnectionPool { get; }
     public CancellationTokenSource Cancellation => _connectionsCancellation;
 
     public PipeTransportClient(
         ILogger<PipeTransportClient<TP>> logger,
-        string sendPipe,
-        string heartBeatPipe,
-        string receivePipe,
+        string pipePrefix,
+        string clientId,
         int instances,
         IPipeHeartbeatReceiver<TP> heartbeatReceiver,
         IPipeMessageWriter messageWriter)
@@ -57,6 +56,19 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
         ConnectionPool = new PipeConnectionManager(
             logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _connectionsCancellation.Token);
+        
+        //limitation on unix
+        const int maxPipeLength = 108;
+
+        var sendPipe = $"{pipePrefix}";
+        if (sendPipe.Length > maxPipeLength)
+            throw new ArgumentOutOfRangeException($"send pipe {sendPipe} too long, limit is {maxPipeLength}");        
+        var heartBeatPipe = $"{pipePrefix}.{"heartbeat"}";
+        if (heartBeatPipe.Length > maxPipeLength)
+            throw new ArgumentOutOfRangeException($"send pipe {heartBeatPipe} too long, limit is {maxPipeLength}");        
+        var receivePipe = $"{pipePrefix}.{clientId}.receive";
+        if (receivePipe.Length > maxPipeLength)
+            throw new ArgumentOutOfRangeException($"send pipe {receivePipe} too long, limit is {maxPipeLength}");        
 
         HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, ConnectionPool, heartbeatReceiver, _messageWriter);
         RequestOut = new PipeRequestOutHandler(logger, sendPipe, ConnectionPool);
@@ -80,7 +92,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     {
         var receiveTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
-        
+
         //automatically and forcefully cancel request if client got disposed.
         using var clientStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(_connectionsCancellation.Token);
         clientStopCancellation.Token.Register(() => receiveTaskSource.SetCanceled());
@@ -124,7 +136,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             _logger.LogDebug("received reply for message {MessageId} from server", requestMessage.Id);
         }
         catch (OperationCanceledException)
-        {            
+        {
             _logger.LogDebug("cancelled request message {MessageId}", requestMessage.Id);
             throw;
         }

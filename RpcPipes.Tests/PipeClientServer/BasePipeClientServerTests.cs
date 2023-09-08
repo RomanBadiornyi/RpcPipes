@@ -51,7 +51,7 @@ public class BasePipeClientServerTests
             }).BuildServiceProvider();
         _clientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
         _serverLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
-        _clientLogger.LogInformation("start running test {TestCase}", TestContext.CurrentContext.Test.FullName);
+        _clientLogger.LogInformation("start running test {TestCase}", TestContext.CurrentContext.Test.Name);
     }
 
     [TearDown]

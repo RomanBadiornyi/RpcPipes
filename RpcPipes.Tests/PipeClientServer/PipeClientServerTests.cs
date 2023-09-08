@@ -18,12 +18,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
         
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);        
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);        
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
@@ -39,12 +39,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_OnDeadlineReplyCancelled()
     {        
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 10);
@@ -67,12 +67,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_OnTimeoutReplyCancelled()
     {
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 10);
@@ -98,12 +98,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_AllConnectedOnMessageSendAndDisconnectedOnDispose()
     {        
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 4, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
         
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);                        
             pipeClient.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);            
@@ -164,12 +164,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 2, _serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 2, _serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
@@ -178,7 +178,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);
@@ -194,14 +194,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_MultipleClients_AllResponsesReceived()
     {
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 4, _serializer);
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 4, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
 
         var replies = new ConcurrentBag<ReplyMessage>();
         var clientTasks = Enumerable.Range(0, 4).Select(async i => {
-            var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.{i}";
+            var clientId = $"{TestContext.CurrentContext.Test.Name}.{i}";
             await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-                _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+                _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
             {
                 pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
                 var request = new RequestMessage($"{i}", 0);
@@ -237,12 +237,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
         heartbeatHandler.HeartbeatMessage(Arg.Any<Guid>())
             .Returns(args => new HeartbeatMessage(0.1, ""), args => new HeartbeatMessage(0.5, ""), args => new HeartbeatMessage(1.0, ""));
         
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
         _serverTask = pipeServer.Start(_messageHandler, heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var requestContext = new PipeRequestContext
@@ -275,12 +275,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
             .Returns(args => _serializer.WriteResponse((PipeMessageResponse<ReplyMessage>)args[0], (Stream)args[1], (CancellationToken)args[2]))
             .AndDoes(x => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
 
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {          
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);  
             var requestContext = new PipeRequestContext 
@@ -304,12 +304,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns<ReplyMessage>(args => throw new InvalidOperationException("handler error"));
         
-        var clientId = $"TestPipe.{TestContext.CurrentContext.Test.FullName}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "TestPipe", "Heartbeat.TestPipe", 1, _serializer);
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "TestPipe", "Heartbeat.TestPipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 0);

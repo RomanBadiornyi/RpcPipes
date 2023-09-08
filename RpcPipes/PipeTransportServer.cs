@@ -40,11 +40,18 @@ public class PipeTransportServer
     public CancellationTokenSource Cancellation => _connectionsCancellation;
 
     public PipeTransportServer(
-        ILogger<PipeTransportServer> logger, string receivePipe, string heartbeatPipe, int instances, IPipeMessageWriter messageWriter)
+        ILogger<PipeTransportServer> logger, string pipePrefix, int instances, IPipeMessageWriter messageWriter)
     {        
         _logger = logger;
-        _receivePipe = receivePipe;
-        _heartbeatPipe = heartbeatPipe;
+
+        //limitation on unix
+        const int maxPipeLength = 108;
+        _receivePipe = $"{pipePrefix}";
+        if (_receivePipe.Length > maxPipeLength)
+            throw new ArgumentOutOfRangeException($"send pipe {_receivePipe} too long, limit is {maxPipeLength}");                
+        _heartbeatPipe = $"{pipePrefix}.heartbeat";
+        if (_heartbeatPipe.Length > maxPipeLength)
+            throw new ArgumentOutOfRangeException($"send pipe {_heartbeatPipe} too long, limit is {maxPipeLength}");                        
         _instances = instances;
         _messageWriter = messageWriter;
     }
