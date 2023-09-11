@@ -79,7 +79,10 @@ public class PipeClientServerTests : BasePipeClientServerTests
             var request = new RequestMessage("hello world", 10);
             var cts = new CancellationTokenSource();
             cts.CancelAfter(TimeSpan.FromMilliseconds(10));
-            var requestContext = new PipeRequestContext();
+            var requestContext = new PipeRequestContext
+            {
+                Heartbeat = TimeSpan.FromMilliseconds(10)
+            };
             var exception = Assert.ThrowsAsync<PipeServerException>(() =>
                 pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token));
             Assert.That(exception, Is.Not.Null);
@@ -118,7 +121,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
-        {            
+        {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
             var request = new RequestMessage("hello world", 1);
             var requestContext = new PipeRequestContext
@@ -154,6 +157,30 @@ public class PipeClientServerTests : BasePipeClientServerTests
     }
 
     [Test]
+    public async Task RequestReply_WhenClientDisposed_ReplyCancelled()
+    {
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
+        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
+
+        using var pipeClient = new PipeTransportClient<HeartbeatMessage>(
+            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer);
+        pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
+
+        await pipeClient.DisposeAsync();
+
+        var request = new RequestMessage("hello world", 10);
+        var requestContext = new PipeRequestContext();
+        var exception = Assert.ThrowsAsync<TaskCanceledException>(() =>
+            pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
+        Assert.That(exception, Is.Not.Null);
+        Assert.That(exception.Message, Does.Contain("Request cancelled due to cancellation of client"));
+
+        _serverStop.Cancel();
+        await _serverTask;
+    }
+
+    [Test]
     public async Task RequestReply_AllConnectedOnMessageSendAndDisconnectedOnDispose()
     {
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
@@ -174,10 +201,10 @@ public class PipeClientServerTests : BasePipeClientServerTests
                 Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
                 Assert.That(_connections["PipeTransportServer.client-connections"], Is.EqualTo(0));
             });
-            var request = new RequestMessage("hello world", 0.5);
+            var request = new RequestMessage("hello world", 0.1);
             var requestContext = new PipeRequestContext
             {
-                Heartbeat = TimeSpan.FromMilliseconds(100)
+                Heartbeat = TimeSpan.FromMilliseconds(10)
             };
             _ = await pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
             Assert.Multiple(() =>
@@ -223,7 +250,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 2, _serializer);
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
@@ -280,23 +307,23 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
     [Test]
     public async Task RequestReply_ProgressUpdated()
-    {        
+    {
         var heartbeatSync = new object();
         var heartbeatMessages = new ConcurrentBag<HeartbeatMessage>();
         var heartbeatMessageReceiver = Substitute.For<IPipeHeartbeatReceiver<HeartbeatMessage>>();
         heartbeatMessageReceiver.OnHeartbeatMessage(Arg.Any<HeartbeatMessage>())
-            .Returns(args => 
-        { 
-            heartbeatMessages.Add((HeartbeatMessage)args[0]); 
+            .Returns(args =>
+        {
+            heartbeatMessages.Add((HeartbeatMessage)args[0]);
             lock (heartbeatSync) { Monitor.Pulse(heartbeatSync); }
-            return Task.CompletedTask; 
+            return Task.CompletedTask;
         });
-        
+
         var heartbeatHandler = Substitute.ForPartsOf<PipeHeartbeatHandler<HeartbeatMessage>>();
         heartbeatHandler.HeartbeatMessage(Arg.Any<Guid>())
             .Returns(
-                args => new HeartbeatMessage(0.1, ""), 
-                args => new HeartbeatMessage(0.5, ""), 
+                args => new HeartbeatMessage(0.1, ""),
+                args => new HeartbeatMessage(0.5, ""),
                 args => new HeartbeatMessage(1.0, ""));
 
         var receiveEventHandle = new ManualResetEventSlim(false);
@@ -322,7 +349,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             var requestContext = new PipeRequestContext { Heartbeat = TimeSpan.FromMilliseconds(5) };
             var request = new RequestMessage("hello world", 1);
             var clientTask = pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None);
-            
+
             receiveEventHandle.Wait(TimeSpan.FromSeconds(30));
             await Task.Run(() => {
                 lock (heartbeatSync)
@@ -331,7 +358,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
                     {
                         Monitor.Wait(heartbeatSync, TimeSpan.FromSeconds(30));
                     }
-                }                
+                }
             });
             //as soon as we received 3 heartbeat messages - release message handler to complete request
             proceedEventHandle.Set();
