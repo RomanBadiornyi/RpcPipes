@@ -25,6 +25,7 @@ public sealed class NUnitLogger : ILogger
             return;
         }
         
+        var time = DateTime.Now.ToString("u");
         var message = $"{formatter(state, null)}";
         if (message == null && exception != null)
             message = exception.Message;
@@ -32,7 +33,7 @@ public sealed class NUnitLogger : ILogger
             message = "";
 
         var level = logLevel.ToString().ToLower();
-        TestContext.Out.WriteLine($"[{_name}]: {level} - {message}");
+        TestContext.Out.WriteLine($"{time} [{level}]: {_name} - {message}");
         if (exception != null)
             TestContext.Out.WriteLine(exception.ToString());        
     }
