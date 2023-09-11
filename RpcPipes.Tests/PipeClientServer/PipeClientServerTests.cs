@@ -250,7 +250,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
             .Returns(new ReplyMessage("hi"));
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
+        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 2, _serializer);
         _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
