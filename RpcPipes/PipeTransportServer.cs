@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
-using System.IO.Pipes;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeConnections;
 using RpcPipes.PipeData;
 using RpcPipes.PipeHandlers;
 using RpcPipes.PipeHeartbeat;
@@ -36,7 +36,9 @@ public class PipeTransportServer
     internal PipeRequestInHandler RequestIn { get; private set; }
     internal PipeHeartbeatInHandler HeartbeatIn { get; private set; }
 
-    public PipeConnectionManager ConnectionPool { get; private set; }
+    public PipeConnectionPool ConnectionPool { get; private set; }
+    public PipeMessageDispatcher MessageDispatcher { get; private set; }
+
     public CancellationTokenSource Cancellation => _connectionsCancellation;
 
     public PipeTransportServer(
@@ -70,15 +72,14 @@ public class PipeTransportServer
             _connectionsCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
 
             var requests = new ConcurrentDictionary<Guid, RequestResponse<TReq, TRep>>();
-            ConnectionPool = new PipeConnectionManager(
-                _logger, _meter, _instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _connectionsCancellation.Token);        
+            var headerBuffer = 1 * 1024;
+            var contentBuffer = 4 * 1024;
+            ConnectionPool = new PipeConnectionPool(_logger, _meter, _instances, contentBuffer, _connectionsCancellation.Token);
+            MessageDispatcher = new PipeMessageDispatcher(_logger, ConnectionPool, _instances, headerBuffer, contentBuffer, _connectionsCancellation.Token);
 
-            HeartbeatIn = new PipeHeartbeatInHandler(
-                _logger, _heartbeatPipe, ConnectionPool, _messageWriter);
-            RequestIn = new PipeRequestInHandler(
-                _logger, _receivePipe, ConnectionPool, heartbeatHandler);
-            ReplyOut = new PipeReplyOutHandler(
-                _logger, ConnectionPool, heartbeatHandler);
+            HeartbeatIn = new PipeHeartbeatInHandler(_logger, _heartbeatPipe, MessageDispatcher, _messageWriter);
+            RequestIn = new PipeRequestInHandler(_logger, _receivePipe, MessageDispatcher, heartbeatHandler);
+            ReplyOut = new PipeReplyOutHandler(_logger, MessageDispatcher, heartbeatHandler);
 
             _connectionsTask = Task
                 .WhenAll(
@@ -86,7 +87,8 @@ public class PipeTransportServer
                     HeartbeatIn.Start(heartbeatHandler)
                 )
                 //wait also until we complete all client connections
-                .ContinueWith(_ => Task.WhenAll(ReplyOut.ChannelTasks), CancellationToken.None).Unwrap()
+                .ContinueWith(_ => ReplyOut.ClientTask, CancellationToken.None).Unwrap()
+                .ContinueWith(_ => ConnectionPool.DisposeAsync().AsTask()).Unwrap()
                 .ContinueWith(_ => { _logger.LogDebug("server has been stopped"); }, CancellationToken.None);
 
             _started = true;
@@ -134,7 +136,7 @@ public class PipeTransportServer
         {
             _logger.LogWarning(e, "unable to consume message {MessageId} due to error, reply error back to client", requestContainer.Handle.Id);
             requestContainer.ResponseMessage.SetRequestException(e);
-            ReplyOut.PublishResponseMessage(requestContainer.Handle);
+            await ReplyOut.PublishResponseMessage(requestContainer.Handle);
             return false;
         }
     }
@@ -155,6 +157,7 @@ public class PipeTransportServer
             _logger.LogDebug("request execution starts for message {MessageId}", requestContainer.Handle.Id);
             requestCancellation.Token.ThrowIfCancellationRequested();    
             requestContainer.ResponseMessage.Reply = await messageHandler.HandleRequest(requestContainer.RequestMessage.Request, requestCancellation.Token);
+            requestCancellation.Token.ThrowIfCancellationRequested();    
             _logger.LogDebug("request execution completed for message {MessageId}", requestContainer.Handle.Id);
         }
         catch (OperationCanceledException e)
@@ -168,7 +171,7 @@ public class PipeTransportServer
             requestContainer.ResponseMessage.SetRequestException(e);
         }
         heartbeatHandler.EndMessageExecute(requestContainer.Handle.Id);
-        ReplyOut.PublishResponseMessage(requestContainer.Handle);
+        await ReplyOut.PublishResponseMessage(requestContainer.Handle);
     }
 
     private async Task SendRequest<TReq, TRep>(RequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)

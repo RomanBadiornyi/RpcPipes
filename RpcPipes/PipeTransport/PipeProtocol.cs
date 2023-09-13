@@ -157,13 +157,13 @@ public class PipeProtocol
         return message;
     }
 
-    public async Task<T> ReceiveMessage<T>(
+    public async Task<(T Message, bool Received)> ReceiveMessage<T>(
         Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
         var header = await BeginReceiveMessage(null, cancellation);
         if (header != null)
-            return await EndReceiveMessage(header.MessageId, readFunc, cancellation);
-        return default;
+            return (await EndReceiveMessage(header.MessageId, readFunc, cancellation), true);
+        return (default, false);
     }
 
     private async Task WaitAcknowledge(

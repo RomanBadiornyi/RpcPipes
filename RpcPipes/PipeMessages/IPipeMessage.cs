@@ -2,5 +2,5 @@ namespace RpcPipes.PipeMessages;
 
 public interface IPipeMessage
 {
-    Guid Id { get; }
+    Guid Id { get; }    
 }

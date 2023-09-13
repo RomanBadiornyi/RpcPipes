@@ -6,6 +6,7 @@ using RpcPipes.Models.PipeSerializers;
 using RpcPipes.PipeData;
 using RpcPipes.PipeHeartbeat;
 using RpcPipes.Models.PipeHeartbeat;
+using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
@@ -67,26 +68,45 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
     [Test]
     public async Task RequestReply_OnTimeout_ReplyCancelled()
-    {
+    {        
+        var receiveEventHandle = new ManualResetEventSlim(false);
+        var messageHandler = Substitute.For<IPipeMessageHandler<RequestMessage, ReplyMessage>>();
+        messageHandler.HandleRequest(Arg.Any<RequestMessage>(), Arg.Any<CancellationToken>())
+            .Returns(async args =>
+            {
+                receiveEventHandle.Set();
+                var wait = 0;
+                while (!((CancellationToken)args[1]).IsCancellationRequested && wait++ < 10)
+                    await Task.Delay(TimeSpan.FromMilliseconds(5));
+                return new ReplyMessage("hi");
+            });
+
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
-        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
+        _serverTask = pipeServer.Start(messageHandler, _heartbeatHandler, _serverStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
             _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
-            var request = new RequestMessage("hello world", 10);
-            var cts = new CancellationTokenSource();
-            cts.CancelAfter(TimeSpan.FromMilliseconds(10));
+            var request = new RequestMessage("hello world", 0);
+            
             var requestContext = new PipeRequestContext
             {
                 Heartbeat = TimeSpan.FromMilliseconds(10)
             };
-            var exception = Assert.ThrowsAsync<PipeServerException>(() =>
-                pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token));
+            
+            var cts = new CancellationTokenSource();
+            var sendTask = pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token);
+            //wait for message to arrive to server
+            receiveEventHandle.Wait(TimeSpan.FromSeconds(30));            
+            //cancel request execution from the client side            
+            cts.Cancel();            
+
+            var exception = Assert.ThrowsAsync<PipeServerException>(() => sendTask);
+
             Assert.That(exception, Is.Not.Null);
-            Assert.That(exception.Message, Does.Contain("A task was canceled"));
+            Assert.That(exception.Message, Does.Contain("The operation was canceled"));
         }
 
         Assert.That(_messages["active-messages"], Is.EqualTo(0));
@@ -191,9 +211,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
             _clientLogger, "rpc.pipe", clientId, 4, _heartbeatMessageReceiver, _serializer))
         {
             pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
-            pipeClient.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
-            pipeServer.ConnectionPool.ClientConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
-
+            pipeClient.ConnectionPool.ConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
+            pipeServer.ConnectionPool.ConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
             Assert.Multiple(() =>
             {
                 Assert.That(_connections["PipeTransportClient.server-connections"], Is.EqualTo(0));
@@ -234,7 +253,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         Assert.That(_connections["PipeTransportServer.client-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(4),
             "incorrect server connections on server");
 
-        _serverStop.Cancel();
+        _serverStop.Cancel();        
         await _serverTask;
 
         Assert.That(_connections["PipeTransportServer.server-connections"], Is.EqualTo(0),

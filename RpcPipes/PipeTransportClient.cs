@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
-using System.IO.Pipes;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeConnections;
 using RpcPipes.PipeData;
 using RpcPipes.PipeHandlers;
 using RpcPipes.PipeHeartbeat;
@@ -38,7 +38,9 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     internal PipeRequestOutHandler RequestOut { get; }
     internal PipeReplyInHandler ReplyIn { get; }
 
-    public PipeConnectionManager ConnectionPool { get; }
+    public PipeConnectionPool ConnectionPool { get; }
+    public PipeMessageDispatcher MessageDispatcher { get; }
+
     public CancellationTokenSource Cancellation => _connectionsCancellation;
 
     public PipeTransportClient(
@@ -54,8 +56,10 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
         _connectionsCancellation = new CancellationTokenSource();
 
-        ConnectionPool = new PipeConnectionManager(
-            logger, _meter, instances, 1 * 1024, 4 * 1024, PipeOptions.Asynchronous | PipeOptions.WriteThrough, _connectionsCancellation.Token);
+        var headerBuffer = 1 * 1024;
+        var contentBuffer = 4 * 1024;
+        ConnectionPool = new PipeConnectionPool(logger, _meter, instances, contentBuffer, _connectionsCancellation.Token);
+        MessageDispatcher = new PipeMessageDispatcher(logger, ConnectionPool, instances, headerBuffer, contentBuffer, _connectionsCancellation.Token);
 
         //limitation on unix
         const int maxPipeLength = 108;
@@ -70,15 +74,16 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         if (receivePipe.Length > maxPipeLength)
             throw new ArgumentOutOfRangeException($"send pipe {receivePipe} too long, limit is {maxPipeLength}");
 
-        HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, ConnectionPool, heartbeatReceiver, _messageWriter);
-        RequestOut = new PipeRequestOutHandler(logger, sendPipe, ConnectionPool);
-        ReplyIn = new PipeReplyInHandler(logger, receivePipe, ConnectionPool);
+        HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, MessageDispatcher, heartbeatReceiver, _messageWriter);
+        RequestOut = new PipeRequestOutHandler(logger, sendPipe, MessageDispatcher, OnRequestSent);
+        ReplyIn = new PipeReplyInHandler(logger, receivePipe, MessageDispatcher);
 
         _connectionsTasks = Task
             .WhenAll(ReplyIn.Start(GetRequestMessageById))
             //wait until we complete all client connections
-            .ContinueWith(_ => Task.WhenAll(RequestOut.ChannelTasks), CancellationToken.None).Unwrap()
-            .ContinueWith(_ => Task.WhenAll(HeartbeatOut.ChannelTasks), CancellationToken.None).Unwrap();
+            .ContinueWith(_ => RequestOut.ClientTask, CancellationToken.None).Unwrap()
+            .ContinueWith(_ => HeartbeatOut.ClientTask, CancellationToken.None).Unwrap()
+            .ContinueWith(_ => ConnectionPool.DisposeAsync().AsTask()).Unwrap();
 
         PipeClientRequestMessage GetRequestMessageById(Guid id)
         {
@@ -86,6 +91,9 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
                 return requestMessage;
             return null;
         }
+
+        ValueTask OnRequestSent(PipeClientHeartbeatMessage requestMessage)
+            => HeartbeatOut.PublishHeartbeatMessage(requestMessage);
     }
 
     public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken requestCancellation)
@@ -132,14 +140,9 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             async (p, t) => { pipeResponse = await ReadReply<TRep>(requestMessage.Id, p, t); };
 
         if (_requestQueue.TryAdd(requestMessage.Id, requestMessage))
-            RequestOut.PublishRequestMessage(requestMessage, StartHeartbeat);
+            await RequestOut.PublishRequestMessage(requestMessage);
         else
             throw new InvalidOperationException($"Message with {requestMessage.Id} already scheduled");
-
-        void StartHeartbeat(PipeClientHeartbeatMessage requestMessage)
-        {
-            HeartbeatOut.PublishHeartbeatMessage(requestMessage);
-        }
 
         _logger.LogDebug("scheduled request execution for message {MessageId}", requestMessage.Id);
         try
@@ -190,6 +193,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     public void Dispose()
     {
+        _connectionsCancellation.Cancel();
         _connectionsTasks.Wait();
         _logger.LogDebug("client has been disposed");
     }

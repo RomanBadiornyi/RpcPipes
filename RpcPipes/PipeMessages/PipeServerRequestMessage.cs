@@ -5,7 +5,7 @@ namespace RpcPipes.PipeMessages;
 internal class PipeServerRequestMessage : IPipeMessage
 {
     public Guid Id { get;  }
-    public string ReplyPipe { get;set; }
+    public string PipeName { get;set; }
 
     public int Retries { get; set; }
     
@@ -15,9 +15,9 @@ internal class PipeServerRequestMessage : IPipeMessage
     public Func<Exception, bool> ReportError { get; set; }
     public Action<Exception, bool> OnMessageCompleted { get; set; }
 
-    public PipeServerRequestMessage(Guid id, string reply)
+    public PipeServerRequestMessage(Guid id, string pipeName)
     {
         Id = id;
-        ReplyPipe = reply;
+        PipeName = pipeName;
     }
 }

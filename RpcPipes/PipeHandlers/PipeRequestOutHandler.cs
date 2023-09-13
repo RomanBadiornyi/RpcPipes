@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using RpcPipes.PipeExceptions;
 using RpcPipes.PipeMessages;
@@ -14,35 +14,31 @@ internal class PipeRequestOutHandler
 
     private ILogger _logger;
     
-    private PipeConnectionManager _connectionPool;
+    private PipeMessageDispatcher _connectionPool;
 
-    private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeClientRequestMessage>> _requestChannels = new();
+    private readonly Channel<PipeClientRequestMessage> _requestChannel = Channel.CreateUnbounded<PipeClientRequestMessage>();
 
     public string PipeName { get; }
-    public Task[] ChannelTasks => _requestChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray();
+    public Task ClientTask { get; private set; } = Task.CompletedTask;
 
-    public PipeRequestOutHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool)
+    public PipeRequestOutHandler(ILogger logger, string pipeName, PipeMessageDispatcher connectionPool, Func<PipeClientRequestMessage, ValueTask> onMessageSend)
     {
         _logger = logger;
         _connectionPool = connectionPool;
         PipeName = pipeName;
-    }
+        ClientTask = _connectionPool.ProcessClientMessages(_requestChannel, GetTargetPipeName, InvokeHandleSendMessage);
 
-    public void PublishRequestMessage(PipeClientRequestMessage requestMessage, Action<PipeClientRequestMessage> onMessageSend)
-    {
-        var messageQueueRequest = new PipeMessageChannelQueue<PipeClientRequestMessage>
-        {
-            MessageChannels = _requestChannels,
-            Message = requestMessage
-        };
-        _connectionPool.ProcessClientMessage(PipeName, messageQueueRequest, InvokeHandleSendMessage);
+        string GetTargetPipeName(PipeClientRequestMessage requestMessage)
+            => PipeName;
 
         Task InvokeHandleSendMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
             => HandleSendMessage(onMessageSend, requestMessage, protocol, cancellation);
-
     }
 
-    private async Task HandleSendMessage(Action<PipeClientRequestMessage> onMessageSend, PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
+    public ValueTask PublishRequestMessage(PipeClientRequestMessage requestMessage)
+        => _requestChannel.Writer.WriteAsync(requestMessage);
+
+    private async Task HandleSendMessage(Func<PipeClientRequestMessage, ValueTask> onMessageSend, PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
         try
         {
@@ -50,7 +46,7 @@ internal class PipeRequestOutHandler
             //if we get to this point and request not cancelled we send message to server without interruption by passing global cancellation.
             await requestMessage.SendAction.Invoke(protocol, cancellation);
             _sentMessagesCounter.Add(1);
-            onMessageSend.Invoke(requestMessage);
+            await onMessageSend.Invoke(requestMessage);
             _logger.LogDebug("sent message {MessageId} for execution", requestMessage.Id);
         }
         catch (OperationCanceledException e)
@@ -65,17 +61,17 @@ internal class PipeRequestOutHandler
         }
         catch (Exception e)
         {
-            HandleSendMessageError(onMessageSend, requestMessage, e);
+            await HandleSendMessageError(requestMessage, e);
         }
     }
 
-    private void HandleSendMessageError(Action<PipeClientRequestMessage> onMessageSend, PipeClientRequestMessage requestMessage, Exception e)
+    private async Task HandleSendMessageError(PipeClientRequestMessage requestMessage, Exception e)
     {
         requestMessage.Retries++;
         if (requestMessage.Retries < 3)
         {
             //push message back to the channel so we will attempt to retry sending it
-            PublishRequestMessage(requestMessage, onMessageSend);
+            await PublishRequestMessage(requestMessage);
         }
         else
         {

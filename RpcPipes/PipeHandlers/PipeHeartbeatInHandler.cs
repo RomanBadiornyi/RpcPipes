@@ -8,7 +8,7 @@ namespace RpcPipes.PipeHandlers;
 internal class PipeHeartbeatInHandler
 {
     private ILogger _logger;
-    private PipeConnectionManager _connectionPool;
+    private PipeMessageDispatcher _connectionPool;
     private IPipeMessageWriter _messageWriter;
 
     public string PipeName { get; }
@@ -16,7 +16,7 @@ internal class PipeHeartbeatInHandler
     public PipeHeartbeatInHandler(
         ILogger logger,
         string pipeName,
-        PipeConnectionManager connectionPool,
+        PipeMessageDispatcher connectionPool,
         IPipeMessageWriter messageWriter)
     {
         _logger = logger;
@@ -38,7 +38,7 @@ internal class PipeHeartbeatInHandler
         where TP: IPipeHeartbeat
     {
         var pipeHeartbeat = default(TP);
-        var pipeHeartbeatRequest = await protocol.ReceiveMessage(ReadHeartbeat, cancellation);
+        var (pipeHeartbeatRequest, _) = await protocol.ReceiveMessage(ReadHeartbeat, cancellation);
         if (pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
         {
             pipeHeartbeat = heartbeatHandler.HeartbeatMessage(pipeHeartbeatRequest.Id);

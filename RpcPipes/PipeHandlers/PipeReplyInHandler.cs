@@ -12,11 +12,11 @@ internal class PipeReplyInHandler
     
     private ILogger _logger;
     
-    private PipeConnectionManager _connectionPool;
+    private PipeMessageDispatcher _connectionPool;
 
     public string PipeName { get; }
 
-    public PipeReplyInHandler(ILogger logger, string pipeName, PipeConnectionManager connectionPool)
+    public PipeReplyInHandler(ILogger logger, string pipeName, PipeMessageDispatcher connectionPool)
     {
         _logger = logger;
         _connectionPool = connectionPool;

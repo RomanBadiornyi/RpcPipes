@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using RpcPipes.PipeExceptions;
 using RpcPipes.PipeHeartbeat;
@@ -15,40 +15,40 @@ internal class PipeReplyOutHandler
     
     private ILogger _logger;
 
-    private PipeConnectionManager _connectionPool;
+    private PipeMessageDispatcher _connectionPool;
     private IPipeHeartbeatHandler _heartbeatHandler;
 
-    private readonly ConcurrentDictionary<string, PipeMessageChannel<PipeServerRequestMessage>> _responseChannels = new();    
+    private readonly Channel<PipeServerRequestMessage> _responseChannel = Channel.CreateUnbounded<PipeServerRequestMessage>();
 
-    public Task[] ChannelTasks => _responseChannels.Values.Select(c => c.ChannelTask).Where(t => t != null).ToArray();
+    public Task ClientTask { get; private set;} = Task.CompletedTask;
     
     public PipeReplyOutHandler(
         ILogger logger, 
-        PipeConnectionManager connectionPool,
+        PipeMessageDispatcher connectionPool,
         IPipeHeartbeatHandler heartbeatHandler)
     {
         _logger = logger;
         _connectionPool = connectionPool;
         _heartbeatHandler = heartbeatHandler;
+        ClientTask = connectionPool.ProcessClientMessages(_responseChannel, GetTargetPipeName, InvokeSendResponse);
+
+        string GetTargetPipeName(PipeServerRequestMessage requestMessage)
+            => requestMessage.PipeName;
+
+        Task InvokeSendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
+            => SendResponse(requestMessage, protocol, cancellation);        
     }
 
-    public void PublishResponseMessage(PipeServerRequestMessage requestMessage)
+    public ValueTask PublishResponseMessage(PipeServerRequestMessage requestMessage)
     {
         _logger.LogDebug("scheduling reply for message {MessageId}", requestMessage.Id);
         _replyMessagesCounter.Add(1);
-        var messageQueueRequest = new PipeMessageChannelQueue<PipeServerRequestMessage> 
-        { 
-            MessageChannels = _responseChannels, 
-            Message = requestMessage 
-        };
-        _connectionPool.ProcessClientMessage(requestMessage.ReplyPipe, messageQueueRequest, InvokeSendResponse);
-
-        Task InvokeSendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
-            => SendResponse(requestMessage, protocol, cancellation);
+        return _responseChannel.Writer.WriteAsync(requestMessage);
     }
 
     private async Task SendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
+        _logger.LogDebug("scheduled reply for message {MessageId}", requestMessage.Id);
         _replyMessagesCounter.Add(-1);
         try
         {

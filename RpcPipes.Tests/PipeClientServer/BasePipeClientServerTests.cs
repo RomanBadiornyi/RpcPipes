@@ -41,8 +41,8 @@ public class BasePipeClientServerTests
         //if we are not debugging tests - ensure that they don't hang due to deadlocks and enforce client/server to be cancelled after timeout 
         if (!Debugger.IsAttached)
         {
-            _clientRequestTimeout = TimeSpan.FromSeconds(60);
-            _serverTimeout = TimeSpan.FromSeconds(60);
+            _clientRequestTimeout = TimeSpan.FromSeconds(20);
+            _serverTimeout = TimeSpan.FromSeconds(20);
         }
     }
 

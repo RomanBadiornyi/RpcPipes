@@ -14,7 +14,7 @@ internal class PipeRequestInHandler
     private static Counter<int> _handledMessagesCounter = _meter.CreateCounter<int>("handled-messages");
 
     private ILogger _logger;
-    private PipeConnectionManager _connectionPool;
+    private PipeMessageDispatcher _connectionPool;
     private IPipeHeartbeatHandler _heartbeatHandler;
 
     public string PipeName { get; }
@@ -22,7 +22,7 @@ internal class PipeRequestInHandler
     public PipeRequestInHandler(
         ILogger logger,
         string pipeName,
-        PipeConnectionManager connectionPool,
+        PipeMessageDispatcher connectionPool,
         IPipeHeartbeatHandler heartbeatHandler)
     {
         _logger = logger;
