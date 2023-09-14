@@ -7,15 +7,16 @@ public interface IPipeConnection
 
     bool Connected { get; }
     bool InUse { get; }
-    bool Released { get; }
+    bool Disabled { get; }
 
     DateTime LastUsedAt { get; }
 
-    Task<bool> TryReleaseConnection(int timeoutMilliseconds, CancellationToken cancellation);
+    Task<bool> TryReleaseConnection(int timeoutMilliseconds, CancellationToken cancellation);    
+    void DisableConnection();
 }
 
 public interface IPipeConnection<T> : IPipeConnection
     where T : Stream
 {    
-    Task<(bool Used, Exception Error)> UseConnection(Func<T, Task> useFunc, CancellationToken cancellation);    
+    Task<(bool Connected, bool Used, Exception Error)> UseConnection(Func<T, Task> useFunc, CancellationToken cancellation);    
 }

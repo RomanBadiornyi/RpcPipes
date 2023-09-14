@@ -78,6 +78,7 @@ internal class PipeReplyOutHandler
             //we did retry 3 times, if still no luck - drop message
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
             requestMessage.OnMessageCompleted.Invoke(e, false);
+            _logger.LogError(e, "unable to send message {MessageId} due to error", requestMessage.Id);
         }
         else
         {

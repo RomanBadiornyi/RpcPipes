@@ -7,15 +7,18 @@ namespace RpcPipes.PipeConnections;
 
 public class PipeConnectionPool : IAsyncDisposable
 {
-    class ConnectionPool<T>
+    internal class ConnectionPool<T>
     {
-        public SemaphoreSlim ConnectionPoolLock = new SemaphoreSlim(1);
-        public int CurrentInstance;
+        //ensures sync access to connections within the pool
+        public SemaphoreSlim ConnectionPoolLock = new SemaphoreSlim(1);        
 
         public string Name { get; set; }
+
         public int Instances { get; set; }
+        public int MaxInstances { get; set; }
+
         public ConcurrentStack<T> FreeConnections { get; set; }
-        public ConcurrentDictionary<int, T> ConnectionQueue { get; set; }
+        public ConcurrentDictionary<int, T> AllConnections { get; set; }
     }
 
     private ILogger _logger;
@@ -29,8 +32,8 @@ public class PipeConnectionPool : IAsyncDisposable
     private SemaphoreSlim _connectionCleanLock = new SemaphoreSlim(1);
 
     private CancellationToken _cancellation;
-    private ConcurrentDictionary<string, ConnectionPool<PipeServerConnection>> _serverConnections = new();
-    private ConcurrentDictionary<string, ConnectionPool<PipeClientConnection>> _clientConnections = new();
+    private ConcurrentDictionary<string, ConnectionPool<PipeServerConnection>> _connectionsServer = new();
+    private ConcurrentDictionary<string, ConnectionPool<PipeClientConnection>> _connectionsClient = new();
 
     public int Instances { get; }
     public int Buffer { get; }
@@ -41,9 +44,9 @@ public class PipeConnectionPool : IAsyncDisposable
     public TimeSpan ConnectionDisposeTimeout = TimeSpan.FromSeconds(10);
 
     public IEnumerable<IPipeConnection<NamedPipeServerStream>> ServerConnections =>
-        _serverConnections.Values.SelectMany(pool => pool.ConnectionQueue.Values);
+        _connectionsServer.Values.SelectMany(pool => pool.AllConnections.Values);
     public IEnumerable<IPipeConnection<NamedPipeClientStream>> ClientConnections =>
-        _clientConnections.Values.SelectMany(pool => pool.ConnectionQueue.Values);
+        _connectionsClient.Values.SelectMany(pool => pool.AllConnections.Values);
 
     public PipeConnectionPool(ILogger logger, Meter meter, int instances, int buffer, CancellationToken cancellation)
     {
@@ -65,46 +68,38 @@ public class PipeConnectionPool : IAsyncDisposable
         _expiryTimer = new Timer(async _ => { await CleanupExpiredConnections(); }, this, 0, _expiryCheckIntervalMilliseconds);
     }
 
-    public async Task<(bool Used, Exception Error)> UseClientConnection(string pipeName, Func<NamedPipeClientStream, Task> connectionActivityFunc)
+    public async ValueTask<(bool Connected, bool Used, Exception Error)> UseClientConnection(
+        string pipeName, Func<NamedPipeClientStream, Task> connectionActivityFunc, Action<IPipeConnection> connectionCallback = null)
     {
-        var (connection, connectionPool) = await GetOrCreateConnection(pipeName, _clientConnections, CreateNewConnectionPool, CreateNewConnection);
+        var (connection, connectionPool) = await GetOrCreateConnection(pipeName, _connectionsClient, CreateNewConnectionPool, CreateNewConnection);
+        connectionCallback?.Invoke(connection);
         var useResult = await connection.UseConnection(connectionActivityFunc, _cancellation);
         await PutOrReleaseConnection(connectionPool, connection, useResult);
+
         return useResult;
 
-        ConnectionPool<PipeClientConnection> CreateNewConnectionPool(string key)
-            => new()
-            {
-                Name = pipeName,
-                CurrentInstance = 0,
-                Instances = Instances,
-                FreeConnections = new ConcurrentStack<PipeClientConnection>(),
-                ConnectionQueue = new ConcurrentDictionary<int, PipeClientConnection>()
-            };
+        ConnectionPool<PipeClientConnection> CreateNewConnectionPool(string pipeName)
+            => CreateConnectionPool<PipeClientConnection>(pipeName);
 
-        PipeClientConnection CreateNewConnection(int key)
-            => new(_logger, _meter, key, pipeName, ConnectionTimeout, ConnectionRetryTimeout);
+        PipeClientConnection CreateNewConnection(int connectionId)
+            => new(_logger, _meter, connectionId, pipeName, ConnectionTimeout, ConnectionRetryTimeout);
     }
 
-    public async Task<(bool Used, Exception Error)> UseServerConnection(string pipeName, Func<NamedPipeServerStream, Task> connectionActivityFunc)
+    public async ValueTask<(bool Connected, bool Used, Exception Error)> UseServerConnection(
+        string pipeName, Func<NamedPipeServerStream, Task> connectionActivityFunc, Action<IPipeConnection> connectionCallback = null)
     {
-        var (connection, connectionPool) = await GetOrCreateConnection(pipeName, _serverConnections, CreateNewConnectionPool, CreateNewConnection);
+        var (connection, connectionPool) = await GetOrCreateConnection(pipeName, _connectionsServer, CreateNewConnectionPool, CreateNewConnection);
+        connectionCallback?.Invoke(connection);
         var useResult = await connection.UseConnection(connectionActivityFunc, _cancellation);
         await PutOrReleaseConnection(connectionPool, connection, useResult);
+        
         return useResult;
 
-        ConnectionPool<PipeServerConnection> CreateNewConnectionPool(string key)
-            => new()
-            {
-                Name = pipeName,
-                CurrentInstance = 0,
-                Instances = Instances,
-                FreeConnections = new ConcurrentStack<PipeServerConnection>(),
-                ConnectionQueue = new ConcurrentDictionary<int, PipeServerConnection>()
-            };
+        ConnectionPool<PipeServerConnection> CreateNewConnectionPool(string pipeName)
+            => CreateConnectionPool<PipeServerConnection>(pipeName);
 
-        PipeServerConnection CreateNewConnection(int key)
-            => new(_logger, _meter, key, pipeName, Instances, Buffer, ConnectionRetryTimeout);
+        PipeServerConnection CreateNewConnection(int connectionId)
+            => new(_logger, _meter, connectionId, pipeName, Instances, Buffer, ConnectionRetryTimeout);
     }
 
     public async Task<bool> CleanupExpiredConnections()
@@ -116,13 +111,16 @@ public class PipeConnectionPool : IAsyncDisposable
             var currentTime = DateTime.UtcNow;
 
             var client = await ReleaseConnections(
-                _clientConnections, ShouldCleanup, _expiryCleanupTimeout, CancellationToken.None);
+                _connectionsClient, ShouldCleanupClient, _expiryCleanupTimeout, CancellationToken.None);
             var server = await ReleaseConnections(
-                _serverConnections, ShouldCleanup, _expiryCleanupTimeout, CancellationToken.None);
+                _connectionsServer, ShouldCleanupServer, _expiryCleanupTimeout, CancellationToken.None);
 
             return client && server;
 
-            bool ShouldCleanup<TStream>(IPipeConnection<TStream> connection) where TStream : Stream
+            bool ShouldCleanupClient<TStream>(IPipeConnection<TStream> connection) where TStream : Stream
+                => !connection.InUse && connection.LastUsedAt + ConnectionExpiryTimeout < currentTime;
+
+            bool ShouldCleanupServer<TStream>(IPipeConnection<TStream> connection) where TStream : Stream
                 => !connection.Connected && connection.LastUsedAt + ConnectionExpiryTimeout < currentTime;
         }
         finally
@@ -131,7 +129,7 @@ public class PipeConnectionPool : IAsyncDisposable
         }
     }
 
-    private async Task<(T Connection, ConnectionPool<T> ConnectionPool)> GetOrCreateConnection<T>(
+    private async ValueTask<(T Connection, ConnectionPool<T> ConnectionPool)> GetOrCreateConnection<T>(
         string pipeName,
         ConcurrentDictionary<string, ConnectionPool<T>> connections,
         Func<string, ConnectionPool<T>> poolCreateFunc,
@@ -157,11 +155,27 @@ public class PipeConnectionPool : IAsyncDisposable
                 //create connection and release lock
                 if (!connectionPool.FreeConnections.TryPop(out connection))
                 {
-                    //no free connections available, check if we can create new one
-                    if (connectionPool.CurrentInstance < connectionPool.Instances)
-                        connection = connectionPool.ConnectionQueue.GetOrAdd(connectionPool.CurrentInstance++, connectionCreateFunc);
-                    else
-                        throw new IndexOutOfRangeException($"Run out of available connections on the pool {connectionPool.Name}");
+                    //check if maybe there is some disabled connection we can re-create
+                    foreach (var item in connectionPool.AllConnections)
+                    {
+                        if (item.Value.Disabled)
+                        {
+                            connection = connectionCreateFunc(item.Key);
+                            connectionPool.AllConnections[item.Key] = connection;
+                            break;
+                        }
+                    }
+                    if (connection == null)
+                    {
+                        //if no free connections and free slots available, check if we can create new one
+                        if (connectionPool.Instances < connectionPool.MaxInstances)
+                        {
+                            connectionPool.Instances += 1;
+                            connection = connectionPool.AllConnections.GetOrAdd(connectionPool.Instances, connectionCreateFunc);
+                        }
+                        else
+                            throw new IndexOutOfRangeException($"Run out of available connections on the pool {connectionPool.Name}");
+                    }                    
                 }
             }
             finally
@@ -172,30 +186,16 @@ public class PipeConnectionPool : IAsyncDisposable
         return (connection, connectionPool);
     }
 
-    private async Task PutOrReleaseConnection<T>(ConnectionPool<T> connectionPool, T connection, (bool Used, Exception Error) useResult)
+    private async ValueTask PutOrReleaseConnection<T>(
+        ConnectionPool<T> connectionPool, T connection, (bool Connected, bool Used, Exception Error) useResult)
         where T : class, IPipeConnection
     {
-        if (!useResult.Used && useResult.Error != null)
+        if ((!useResult.Connected || !useResult.Used) && useResult.Error != null)
         {
-            //acquire lock on connection pool so we can release connection without race conditions
+            //acquire lock on connection pool and disable this connection, so it won't be used by subsequent calls
             await connectionPool.ConnectionPoolLock.WaitAsync(_cancellation);
-            try
-            {
-                var currentConnections = connectionPool.ConnectionQueue;
-                var rebalancedConnections = new ConcurrentDictionary<int, T>();
-                connectionPool.CurrentInstance = 0;
-                foreach(var connectionFromPool in currentConnections.Values)
-                {
-                    if (connectionFromPool.Id != connection.Id)
-                        rebalancedConnections.GetOrAdd(connectionPool.CurrentInstance++, connectionFromPool);
-                }
-                connectionPool.ConnectionQueue = rebalancedConnections;
-                currentConnections.Clear();
-            }
-            finally
-            {
-                connectionPool.ConnectionPoolLock.Release();
-            }
+            connection.DisableConnection();
+            connectionPool.ConnectionPoolLock.Release();
         }
         else
         {
@@ -213,11 +213,13 @@ public class PipeConnectionPool : IAsyncDisposable
         var allReleased = true;
         foreach(var connectionPool in connections)
         {
-            var connectionPoolConnectionsCount = connectionPool.Value.ConnectionQueue.Count;
+            var connectionPoolConnectionsCount = connectionPool.Value.AllConnections.Count;
             var connectionPoolReleasedSomeConnections = false;
             var connectionPoolReleasedAllConnections = true;
-            foreach(var connection in connectionPool.Value.ConnectionQueue)
+            foreach(var connection in connectionPool.Value.AllConnections)
             {
+                if (connection.Value == null)
+                    continue;
                 var released = true;
                 if (!releaseCondition.Invoke(connection.Value))
                     released = false;
@@ -231,14 +233,16 @@ public class PipeConnectionPool : IAsyncDisposable
             //acquire ConnectionPoolLock so during cleanup new connections can not be added
             if (connectionPoolConnectionsCount > 0 && connectionPoolReleasedSomeConnections)
             {
-                await connectionPool.Value.ConnectionPoolLock.WaitAsync(cancellation);
-                connectionPoolReleasedAllConnections = true;
+                await connectionPool.Value.ConnectionPoolLock.WaitAsync(cancellation);                
                 try
                 {
-                    foreach(var connection in connectionPool.Value.ConnectionQueue)
+                    connectionPoolReleasedAllConnections = true;
+                    foreach(var connection in connectionPool.Value.AllConnections)
                     {
-                        connectionPoolReleasedAllConnections = connectionPoolReleasedAllConnections && !connection.Value.Connected;
+                        connectionPoolReleasedAllConnections = connectionPoolReleasedAllConnections && 
+                            (connection.Value == null || !connection.Value.Connected);
                     }
+                    //remove connections pool if all connections has been released
                     if (connectionPoolReleasedAllConnections)
                         connections.TryRemove(connectionPool.Key, out _);
                 }
@@ -252,6 +256,16 @@ public class PipeConnectionPool : IAsyncDisposable
         return allReleased;
     }
 
+    private ConnectionPool<T> CreateConnectionPool<T>(string pipeName)
+            => new()
+            {
+                Name = pipeName,
+                Instances = 0,
+                MaxInstances = Instances,
+                FreeConnections = new ConcurrentStack<T>(),
+                AllConnections = new ConcurrentDictionary<int, T>()
+            };
+
     public async ValueTask DisposeAsync()
     {
         _expiryTimer?.Dispose();
@@ -259,14 +273,15 @@ public class PipeConnectionPool : IAsyncDisposable
 
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.CancelAfter(ConnectionDisposeTimeout);
+        
         await _connectionCleanLock.WaitAsync(cancellationSource.Token);
         //acquire connectionCleanLock here so that we don't interfere with cleanup call
         try
         {
             while (
                 (
-                    await ReleaseConnections(_clientConnections, c => true, _expiryCleanupTimeout, CancellationToken.None) != true ||
-                    await ReleaseConnections(_serverConnections, c => true, _expiryCleanupTimeout, CancellationToken.None) != true
+                    await ReleaseConnections(_connectionsClient, c => true, _expiryCleanupTimeout, CancellationToken.None) != true ||
+                    await ReleaseConnections(_connectionsServer, c => true, _expiryCleanupTimeout, CancellationToken.None) != true
                 )
                 && !cancellationSource.IsCancellationRequested
             ) {};

@@ -16,13 +16,13 @@ internal class PipeServerConnection : IPipeConnection<NamedPipeServerStream>
     private NamedPipeServerStream _connection { get; set; }
     private volatile bool _connected;
     private volatile bool _inUse;
-    private volatile bool _isReleased;
+    private bool _disabled;
 
     public int Id { get; }
     public string Name { get; }
-    public bool Connected => _connected;
+    public bool Connected => _connected && _connection != null && _connection.IsConnected;
     public bool InUse => _inUse;
-    public bool Released => _isReleased;
+    public bool Disabled => _disabled;
 
     public DateTime LastUsedAt { get; private set; }
     public TimeSpan ConnectionRetryTimeout { get; }
@@ -43,24 +43,21 @@ internal class PipeServerConnection : IPipeConnection<NamedPipeServerStream>
         ConnectionRetryTimeout = connectionRetryTimeout;
     }
 
-    public async Task<(bool Used, Exception Error)> UseConnection(Func<NamedPipeServerStream, Task> useFunc, CancellationToken cancellation)
+    public async Task<(bool Connected, bool Used, Exception Error)> UseConnection(Func<NamedPipeServerStream, Task> useFunc, CancellationToken cancellation)
     {
         await _connectionLock.WaitAsync(cancellation);
         try
         {
-            _inUse = true;
-            if (_connection == null || !_connected)
-                _connection = new NamedPipeServerStream(Name, Direction, _instances, Transmission, Options, _buffer, _buffer);
-
+            _inUse = true;            
             var (connected, error) = await TryConnect(cancellation);
             if  (connected)
             {
                 LastUsedAt = DateTime.UtcNow;
                 await useFunc.Invoke(_connection);
                 LastUsedAt = DateTime.UtcNow;
-                return (true, error);
+                return (Connected, true, error);
             }
-            return (false, error);
+            return (Connected, false, error);
         }
         catch (Exception ex)
         {
@@ -69,7 +66,7 @@ internal class PipeServerConnection : IPipeConnection<NamedPipeServerStream>
             if (_connection == null && ex is not OperationCanceledException)
                 await Task.Delay(ConnectionRetryTimeout, cancellation);                            
             Disconnect();                        
-            return (true, ex);
+            return (Connected, true, ex);
         }
         finally
         {
@@ -86,7 +83,6 @@ internal class PipeServerConnection : IPipeConnection<NamedPipeServerStream>
         try
         {
             Disconnect();
-            _isReleased = !_connected;
             return !_connected;
         }
         finally
@@ -95,10 +91,20 @@ internal class PipeServerConnection : IPipeConnection<NamedPipeServerStream>
         }
     }
 
+    public void DisableConnection()
+    {
+        _disabled = true;
+    }
+
     private async Task<(bool Connected, Exception error)> TryConnect(CancellationToken cancellation)
     {
-        if (_connected)
+        if (_connected && _connection != null && _connection.IsConnected)
             return (_connected, null);
+        else
+        {
+            Disconnect();                
+            _connection = new NamedPipeServerStream(Name, Direction, _instances, Transmission, Options, _buffer, _buffer);
+        } 
 
         try
         {
@@ -138,7 +144,10 @@ internal class PipeServerConnection : IPipeConnection<NamedPipeServerStream>
     private void Disconnect()
     {
         if (_connection == null)
+        {
+            _connected = false;
             return;
+        }
 
         try
         {
@@ -163,5 +172,5 @@ internal class PipeServerConnection : IPipeConnection<NamedPipeServerStream>
         {
             _logger.LogError(e, "unhandled error occurred when handling {Type} stream pipe {Pipe} got unhandled error", "server", Name);
         }
-    }
+    }    
 }
