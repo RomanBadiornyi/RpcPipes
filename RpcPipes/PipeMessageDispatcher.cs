@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.IO.Pipes;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -55,9 +54,14 @@ public class PipeMessageDispatcher
     {
         while (!_cancellation.IsCancellationRequested)
         {
-            var (connected, used, error) = await _connectionPool.UseServerConnection(pipeName, DispatchMessage);
+            var (connected, dispatched, error) = await _connectionPool.UseServerConnection(pipeName, ShouldDispatchMessage, DispatchMessage);
             if (error != null && !IsConnectionCancelled(error) && !IsConnectionInterrupted(error, connected))
-                _logger.LogError(error, "error occurred while waiting for message on pipe stream {PipeName}, message {Dispatched}", pipeName, used);
+                _logger.LogError(error, "error occurred while waiting for message on pipe stream {PipeName}, dispatched '{Dispatched}'", pipeName, dispatched);
+        }
+
+        bool ShouldDispatchMessage(IPipeConnection connection)
+        {
+            return true;
         }
 
         async Task DispatchMessage(NamedPipeServerStream stream)
@@ -80,29 +84,29 @@ public class PipeMessageDispatcher
             //we push message back into messagesQueue allowing other dispatchers to read same message and then we will bypass dispatching of this item
             //in this case at some point message will be picked by connection which is ready to serve this message and will eventually dispatch it
             var item = await messagesQueue.Reader.ReadAsync(_cancellation);
-            var itemReadyToDispatch = true;
             var pipeName = pipeTarget.Invoke(item);
 
-            var (connected, used, error) = await _connectionPool.UseClientConnection(pipeName, DispatchMessage, ValidateConnection);
-
+            var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);
+            //if message was not dispatched - return it back to channel for retry
+            if (!dispatched)
+                messagesQueue.Writer.TryWrite(item);
+            //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
             if (error != null && !IsConnectionCancelled(error) && !IsConnectionInterrupted(error, connected))
-                _logger.LogError(error, "error occurred while processing message {MessageId} on pipe stream {PipeName}, message {Dispatched}", item.Id, pipeName, used);
+                _logger.LogError(error, "error occurred while processing message {MessageId} on pipe stream {PipeName}, dispatched '{Dispatched}'", item.Id, pipeName, dispatched);
 
-            void ValidateConnection(IPipeConnection connection)
+            bool ShouldDispatchMessage(IPipeConnection connection)
             {
                 //indicate it's not ready to be dispatched so dispatch function will simply do nothing and
                 //other dispatcher who is connected - will dispatch the message
-                if (!connection.Connected && messagesQueue.Writer.TryWrite(item))
-                    itemReadyToDispatch = false;
+                if (!connection.VerifyIfConnected() && messagesQueue.Writer.TryWrite(item))
+                    return false;
+                return true;
             }
 
             async Task DispatchMessage(NamedPipeClientStream stream)
             {
-                if (itemReadyToDispatch)
-                {
-                    var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
+                var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
                     await action.Invoke(item, protocol, _cancellation);
-                }
             }
         }
     }

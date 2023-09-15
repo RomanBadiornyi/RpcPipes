@@ -4,106 +4,36 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeConnections;
 
-internal class PipeClientConnection : IPipeConnection<NamedPipeClientStream>
+internal class PipeClientConnection : PipeConnection<NamedPipeClientStream>
 {
     private ILogger _logger;
     private Counter<int> _clientConnectionsCounter;
 
-    private SemaphoreSlim _connectionLock = new SemaphoreSlim(1);
-
-    private NamedPipeClientStream _connection;
-    private volatile bool _connected;
-    private volatile bool _inUse;
-    private bool _disabled;
-
-    public int Id { get; }
-    public string Name { get; }
-    public bool Connected => _connected && _connection != null && _connection.IsConnected;
-    public bool InUse => _inUse;
-    public bool Disabled => _disabled;
-
-    public DateTime LastUsedAt { get; private set; }
     public TimeSpan ConnectionTimeout { get; }
-    public TimeSpan ConnectionRetryTimeout { get; }
+    
     public PipeOptions Options { get; set; } = PipeOptions.Asynchronous | PipeOptions.WriteThrough;
     public PipeDirection Direction => PipeDirection.InOut;
 
-    public PipeClientConnection(ILogger logger, Meter meter, int id, string name, TimeSpan connectionTimeout, TimeSpan connectionRetryTimeout)
+    public PipeClientConnection(ILogger logger, Meter meter, int id, string name, TimeSpan connectionTimeout, TimeSpan connectionRetryTimeout, TimeSpan connectionExpiryTime)
+        : base(logger, id, name, connectionRetryTimeout, connectionExpiryTime)
     {
         _logger = logger;
         _clientConnectionsCounter = meter.CreateCounter<int>("client-connections");
-
-        Id = id;
-        Name = name;
-        LastUsedAt = DateTime.UtcNow;
         ConnectionTimeout = connectionTimeout;
-        ConnectionRetryTimeout = connectionRetryTimeout;
     }
 
-    public async Task<(bool Connected, bool Used, Exception Error)> UseConnection(Func<NamedPipeClientStream, Task> useFunc, CancellationToken cancellation)
-    {
-        await _connectionLock.WaitAsync(cancellation);
-        try
-        {
-            _inUse = true;            
-            var (connected, error) = await TryConnect(ConnectionTimeout, cancellation);            
-            if (connected)
-            {
-                LastUsedAt = DateTime.UtcNow;
-                await useFunc.Invoke(_connection);
-                LastUsedAt = DateTime.UtcNow;
-                return (Connected, true, error);
-            }
-            //probably server run out of available connections
-            //hence why apply delay here
-            await Task.Delay(ConnectionRetryTimeout, cancellation);
-            return (Connected, false, error);
-        }
-        catch (Exception ex)
-        {                 
-            Disconnect();
-            return (Connected, true, ex);
-        }
-        finally
-        {            
-            _connectionLock.Release();
-            _inUse = false;
-        }
-    }
-
-    public async Task<bool> TryReleaseConnection(int timeoutMilliseconds, CancellationToken cancellation)
-    {
-        var acquired = await _connectionLock.WaitAsync(timeoutMilliseconds, cancellation);
-        if (!acquired)
-            return false;
-        try
-        {
-            Disconnect();            
-            return !_connected;
-        }
-        finally
-        {
-            _connectionLock.Release();
-        }
-    }
-
-    public void DisableConnection()
-    {
-        _disabled = true;
-    }
-
-    private async Task<(bool Connected, Exception Error)> TryConnect(TimeSpan timeout, CancellationToken cancellation)
+    protected override async Task<(bool Ok, Exception Error)> TryConnect(CancellationToken cancellation)
     {
         if (_connected && _connection != null && _connection.IsConnected)
             return (_connected, null);
         else
         {
-            Disconnect();                
+            Disconnect("connection dropped");
             _connection = new NamedPipeClientStream(".", Name, Direction, Options);
-        } 
+        }
 
         using var connectionCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-        connectionCancellationSource.CancelAfter(timeout);
+        connectionCancellationSource.CancelAfter(ConnectionTimeout);
         try
         {
             _connected = true;
@@ -115,7 +45,7 @@ internal class PipeClientConnection : IPipeConnection<NamedPipeClientStream>
         catch (OperationCanceledException ex)
         {
             _connected = false;
-            return (_connected, ex);
+            return (_connected, new TimeoutException("client connection timeout", ex));
         }
         catch (IOException ex)
         {
@@ -137,7 +67,7 @@ internal class PipeClientConnection : IPipeConnection<NamedPipeClientStream>
         }
     }
 
-    private void Disconnect()
+    public override void Disconnect(string reason)
     {
         if (_connection == null)
         {
@@ -151,10 +81,11 @@ internal class PipeClientConnection : IPipeConnection<NamedPipeClientStream>
             {
                 if (_connected)
                 {
+                    _logger.LogDebug("disconnected {Type} pipe of stream pipe {Pipe}, reason '{Reason}'",
+                        "client", Name, reason);
                     _clientConnectionsCounter.Add(-1);
-                    _logger.LogDebug("disconnected {Type} pipe of stream pipe {Pipe}", "client", Name);
                     _connection.Close();
-                }
+                }                
             }
             finally
             {
