@@ -157,7 +157,7 @@ public class PipeConnectionPoolTests
         await Task.WhenAll(serverTask, clientTask);
         Assert.That(_connectionPool.ConnectionsClient.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
         Assert.That(_connectionPool.ConnectionsServer.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
-        await _connectionPool.CleanupExpiredConnections();
+        await _connectionPool.Cleanup();
         Assert.That(_connectionPool.ConnectionsClient.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
         Assert.That(_connectionPool.ConnectionsServer.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
         await _connectionPool.DisposeAsync();

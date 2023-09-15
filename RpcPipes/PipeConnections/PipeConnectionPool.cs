@@ -51,44 +51,48 @@ public partial class PipeConnectionPool : IAsyncDisposable
         if (_cancellation.IsCancellationRequested)
             return;
 
-        _expiryTimer = new Timer(async _ => { await CleanupExpiredConnections(); }, this, 0, _expiryCheckIntervalMilliseconds);
+        _expiryTimer = new Timer(async _ => { await Cleanup(); }, this, 0, _expiryCheckIntervalMilliseconds);
     }
 
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseClientConnection(
-        string pipeName, Func<IPipeConnection, bool> connectionActivityPredicateFunc, Func<NamedPipeClientStream, Task> connectionActivityFunc)
+        string pipeName, 
+        Func<IPipeConnection, bool> activityPredicateFunc, 
+        Func<NamedPipeClientStream, Task> activityFunc)
     {
-        var (connection, connectionPool, error) = await GetOrCreateConnection(pipeName, _connectionsClient, CreateNewConnectionPool);
+        var (connection, connectionPool, error) = await Get(_connectionsClient, pipeName, CreateNewConnectionPool);
         if (error != null)
             return (false, false, error);
-        var useResult = await connection.UseConnection(connectionActivityFunc, connectionActivityPredicateFunc, _cancellation);
-        PutOrReleaseConnection(_connectionsClient, connectionPool, connection, useResult);
+        var useResult = await connection.UseConnection(activityFunc, activityPredicateFunc, _cancellation);
+        Put(_connectionsClient, connectionPool, connection, useResult);
         return useResult;
 
         PipeConnectionGroup<PipeClientConnection> CreateNewConnectionPool(string name)
-            => new PipeConnectionGroup<PipeClientConnection>(name, Instances, CreateNewConnection);
+            => new(name, Instances, CreateNewConnection);
 
         PipeClientConnection CreateNewConnection(int id, string name)
             => new(_logger, _meter, id, name, ConnectionTimeout, ConnectionRetryTimeout, ConnectionExpiryTimeout);
     }
 
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseServerConnection(
-        string pipeName, Func<IPipeConnection, bool> connectionActivityPredicateFunc, Func<NamedPipeServerStream, Task> connectionActivityFunc)
+        string pipeName, 
+        Func<IPipeConnection, bool> activityPredicateFunc, 
+        Func<NamedPipeServerStream, Task> activityFunc)
     {
-        var (connection, connectionPool, error) = await GetOrCreateConnection(pipeName, _connectionsServer, CreateNewConnectionPool);
+        var (connection, connectionPool, error) = await Get(_connectionsServer, pipeName, CreateNewConnectionPool);
         if (error != null)
             return (false, false, error);
-        var useResult = await connection.UseConnection(connectionActivityFunc, connectionActivityPredicateFunc, _cancellation);
-        PutOrReleaseConnection(_connectionsServer, connectionPool, connection, useResult);
+        var useResult = await connection.UseConnection(activityFunc, activityPredicateFunc, _cancellation);
+        Put(_connectionsServer, connectionPool, connection, useResult);
         return useResult;
 
         PipeConnectionGroup<PipeServerConnection> CreateNewConnectionPool(string name)
-            => new PipeConnectionGroup<PipeServerConnection>(name, Instances, CreateNewConnection);
+            => new(name, Instances, CreateNewConnection);
 
         PipeServerConnection CreateNewConnection(int id, string name)
             => new(_logger, _meter, id, name, Instances, Buffer, ConnectionRetryTimeout, ConnectionExpiryTimeout);
     }
 
-    public async Task CleanupExpiredConnections()
+    public async Task Cleanup()
     {
         if (!await _connectionCleanLock.WaitAsync(_expiryCleanupTimeout))
             return;
@@ -96,8 +100,8 @@ public partial class PipeConnectionPool : IAsyncDisposable
         {
             var currentTime = DateTime.UtcNow;
 
-            ReleaseConnections(_connectionsClient, ShouldCleanupClient, "expired");
-            ReleaseConnections(_connectionsServer, ShouldCleanupServer, "expired");
+            Release(_connectionsClient, ShouldCleanupClient, "expired");
+            Release(_connectionsServer, ShouldCleanupServer, "expired");
 
             bool ShouldCleanupClient(IPipeConnection connection)
                 => !connection.InUse && connection.VerifyIfExpired(currentTime);
@@ -111,12 +115,12 @@ public partial class PipeConnectionPool : IAsyncDisposable
         }
     }
 
-    private async ValueTask<(T Connection, PipeConnectionGroup<T> ConnectionPool, Exception Error)> GetOrCreateConnection<T>(
-        string pipeName,
+    private async ValueTask<(T Connection, PipeConnectionGroup<T> ConnectionPool, Exception Error)> Get<T>(
         ConcurrentDictionary<string, PipeConnectionGroup<T>> connections,
+        string pipeName,        
         Func<string, PipeConnectionGroup<T>> poolCreateFunc)
             where T : class, IPipeConnection
-    {
+    {        
         T connection = null;
         PipeConnectionGroup<T> connectionPool = null;
         var tries = 0;
@@ -136,12 +140,12 @@ public partial class PipeConnectionPool : IAsyncDisposable
         return (connection, connectionPool, null);
     }
 
-    private void PutOrReleaseConnection<T>(
+    private void Put<T>(
         ConcurrentDictionary<string, PipeConnectionGroup<T>> connections,
         PipeConnectionGroup<T> connectionPool,
         T connection,
         (bool Connected, bool Dispatched, Exception Error) useResult)
-        where T : class, IPipeConnection
+            where T : class, IPipeConnection
     {
         if (connections.TryGetValue(connectionPool.Name, out var currentConnectionPool) &&
             currentConnectionPool.Equals(connectionPool))
@@ -172,9 +176,11 @@ public partial class PipeConnectionPool : IAsyncDisposable
         }
     }
 
-    private void ReleaseConnections<T>(
-        ConcurrentDictionary<string, PipeConnectionGroup<T>> connections, Func<IPipeConnection, bool> releaseCondition, string reason)
-        where T: IPipeConnection
+    private void Release<T>(
+        ConcurrentDictionary<string, PipeConnectionGroup<T>> connections, 
+        Func<IPipeConnection, bool> releaseCondition, 
+        string reason)
+            where T: IPipeConnection
     {
         foreach(var connectionPool in connections.Values)
         {
@@ -218,8 +224,8 @@ public partial class PipeConnectionPool : IAsyncDisposable
         await _connectionCleanLock.WaitAsync(cancellationSource.Token);
         try
         {
-            ReleaseConnections(_connectionsClient, c => true, "disposed");
-            ReleaseConnections(_connectionsServer, c => true, "disposed");
+            Release(_connectionsClient, c => true, "disposed");
+            Release(_connectionsServer, c => true, "disposed");
         }
         finally
         {
