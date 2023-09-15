@@ -30,9 +30,9 @@ public partial class PipeConnectionPool : IAsyncDisposable
     public TimeSpan ConnectionDisposeTimeout = TimeSpan.FromSeconds(10);
 
     public IEnumerable<IPipeConnection<NamedPipeServerStream>> ConnectionsServer =>
-        _connectionsServer.Values.SelectMany(pool => pool.FreeConnections.Concat(pool.DisabledConnections)).Distinct();
+        _connectionsServer.Values.SelectMany(pool => pool.Connections);
     public IEnumerable<IPipeConnection<NamedPipeClientStream>> ConnectionsClient =>
-        _connectionsClient.Values.SelectMany(pool => pool.FreeConnections.Concat(pool.DisabledConnections)).Distinct();
+        _connectionsClient.Values.SelectMany(pool => pool.Connections);
 
     public PipeConnectionPool(ILogger logger, Meter meter, int instances, int buffer, CancellationToken cancellation)
     {
@@ -59,7 +59,7 @@ public partial class PipeConnectionPool : IAsyncDisposable
     {
         var (connection, connectionPool, error) = await GetOrCreateConnection(pipeName, _connectionsClient, CreateNewConnectionPool);
         if (error != null)
-            return (false, false, error);        
+            return (false, false, error);
         var useResult = await connection.UseConnection(connectionActivityFunc, connectionActivityPredicateFunc, _cancellation);
         PutOrReleaseConnection(_connectionsClient, connectionPool, connection, useResult);
         return useResult;
@@ -125,9 +125,7 @@ public partial class PipeConnectionPool : IAsyncDisposable
             connectionPool = connections.GetOrAdd(pipeName, poolCreateFunc);
             if (!connections.ContainsKey(pipeName))
                 continue;
-            if (connectionPool.FreeConnections.TryPop(out connection))
-                break;
-            if (connectionPool.DisabledConnections.TryDequeue(out connection))
+            if (connectionPool.BorrowConnection(out connection))
                 break;
             if (tries < 10)
                 await Task.Delay(TimeSpan.FromSeconds(_expiryCleanupTimeout));
@@ -153,14 +151,14 @@ public partial class PipeConnectionPool : IAsyncDisposable
                 //after error disconnect and return connection to DisabledConnections queue
                 //this way such connection will be picked in the end when we run out of free connections
                 connection.Disconnect($"error: {useResult.Error.Message}");
-                connectionPool.DisabledConnections.Enqueue(connection);
+                connectionPool.ReturnConnection(connection, true);
             }
             else
             {
                 //if all good - return connection to free FreeConnections stack so that next message will pick most recently used connection
                 //this way during load decrease we will let connections in the bottom of the stack to get expired first
                 //and gradually reduce number of active connections
-                connectionPool.FreeConnections.Push(connection);
+                connectionPool.ReturnConnection(connection, false);
             }
         }
         else
@@ -169,8 +167,8 @@ public partial class PipeConnectionPool : IAsyncDisposable
             // - ReleaseConnections removed whole connection pool considering all connections already released
             // - just before pool gets removed - somebody comes and uses connection from it
             // - in this case we simply shut down this connection as pool isn't tracked anymore
-            connectionPool.DisabledConnections.Enqueue(connection);
             connection.Disconnect("outdated pool");
+            connectionPool.ReturnConnection(connection, true);
         }
     }
 
@@ -181,14 +179,14 @@ public partial class PipeConnectionPool : IAsyncDisposable
         foreach(var connectionPool in connections.Values)
         {
             //ensure all disabled connections are in disconnected state
-            foreach(var connection in connectionPool.DisabledConnections)
+            foreach(var connection in connectionPool.Disabled)
             {
                 if (releaseCondition.Invoke(connection))
                     connection.Disconnect(reason);
             }
             //try to release free connections based on provided delegate
             var allDisconnected = true;
-            foreach(var connection in connectionPool.FreeConnections)
+            foreach(var connection in connectionPool.Free)
             {
                 if (releaseCondition.Invoke(connection))
                     connection.Disconnect(reason);
@@ -198,19 +196,14 @@ public partial class PipeConnectionPool : IAsyncDisposable
             //if we disconnected all connections from FreeConnections -
             //move them now to DisabledConnections in order to indicate that we no longer have FreeConnections available
             if (allDisconnected)
-            {
-                while (connectionPool.FreeConnections.TryPop(out var connection))
-                    connectionPool.DisabledConnections.Enqueue(connection);
-            }
+                connectionPool.DisableConnections();
 
             //lock connections counts for cleanup checks
-            var free = connectionPool.FreeConnections.Count;
-            var disabled = connectionPool.DisabledConnections.Count;
-            if (free == 0 && disabled == connectionPool.Instances)
+            if (connectionPool.Unused())
             {
                 connections.TryRemove(connectionPool.Name, out _);
                 _logger.LogInformation("connection pool {PoolName} cleaned up '{Reason}'", connectionPool.Name, reason);
-            }            
+            }
         }
     }
 
