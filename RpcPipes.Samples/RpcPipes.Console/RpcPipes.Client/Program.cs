@@ -40,69 +40,67 @@ for (var i = 0; i < clientsCount; i++)
     var taskNum = i;
     clients.Add(Task.Run(() => RunClientTasks(taskNum)));
 
-    async Task RunClientTasks(int taskNum)
+    async Task RunClientTasks(int clientId)
     {
-        var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
+        var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeHeartbeatMessage>>>();
         var serializer = new PipeSerializer();
-        var heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
+        var heartbeatReplies = new ConcurrentBag<PipeHeartbeatMessage>();
         var heartbeatMessageReceiver = new PipeHeartbeatReceiver(heartbeatReplies);
 
-        await using (var pipeClient = 
-            new PipeTransportClient<HeartbeatMessage>(logger, sendPipe, taskNum.ToString(), connections, heartbeatMessageReceiver, serializer)) 
-        {
-            var c = pipeClient;
-            Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
-                e.Cancel = true;    
-                c.Dispose();
-            };
+        await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        logger, sendPipe, clientId.ToString(), connections, heartbeatMessageReceiver, serializer); 
+        var c = pipeClient;
+        Console.CancelKeyPress += delegate (object _, ConsoleCancelEventArgs e) {
+            e.Cancel = true;    
+            c.Dispose();
+        };
 
-            logger.LogInformation("Starting client, press Ctrl+C to interrupt");                        
-            var replies = Array.Empty<(ReplyMessage Reply, Exception Error)>();
-            var errors = Array.Empty<(ReplyMessage Reply, Exception Error)>();
+        logger.LogInformation("Starting client, press Ctrl+C to interrupt");                        
+        var replies = Array.Empty<(PipeReplyMessage Reply, Exception Error)>();
+        var errors = Array.Empty<(PipeReplyMessage Reply, Exception Error)>();
+        try
+        {
+            
+            var requests = Enumerable.Range(0, tasks).Select(task => RunTaskHandleError(task, pipeClient)).ToArray();
+            replies = await Task.WhenAll(requests);
+            errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();                        
+        }
+        catch (Exception e)
+        {
+            logger.LogError(e, "unhandled error");     
+        }
+        finally
+        {
+            Console.WriteLine("Heartbeat updated {0}", heartbeatReplies.Count);
+            Console.WriteLine("Replies {0}", replies.Length);
+            Console.WriteLine("Errors {0}", errors.Length);                
+            foreach (var e in errors)
+            {
+                logger.LogError(e.Error.ToString());
+            }        
+        }
+        
+        async Task<(PipeReplyMessage Reply, Exception Error)> RunTaskHandleError(int requestId, PipeTransportClient transport)
+        {
+            var request = new PipeRequestMessage($"Sample request {requestId}", delay);
+            var cts = new CancellationTokenSource();
+            var requestTime = TimeSpan.FromMinutes(timeoutMinutes);
+            var heartbeatTime = TimeSpan.FromSeconds(heartbeat);
+            cts.CancelAfter(requestTime);
             try
             {
-                
-                var requests = Enumerable.Range(0, tasks).Select(i => RunTaskHandleError(i, pipeClient)).ToArray();
-                replies = await Task.WhenAll(requests);
-                errors = replies.Where(receivePipe => receivePipe.Error != null).ToArray();                        
+                var requestContext = new PipeRequestContext
+                {
+                    Deadline = requestTime,
+                    Heartbeat = heartbeatTime
+                };
+                await Task.Delay(TimeSpan.FromSeconds(rand.Next(0, startUpDelay)));
+                return (await transport.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, cts.Token), null);
             }
             catch (Exception e)
             {
-                logger.LogError(e, "unhandled error");     
+                return (null, e);
             }
-            finally
-            {
-                Console.WriteLine("Heartbeat updated {0}", heartbeatReplies.Count);
-                Console.WriteLine("Replies {0}", replies.Length);
-                Console.WriteLine("Errors {0}", errors.Length);                
-                foreach (var e in errors)
-                {
-                    logger.LogError(e.Error.ToString());
-                }        
-            }
-            
-            async Task<(ReplyMessage Reply, Exception Error)> RunTaskHandleError(int i, PipeTransportClient<HeartbeatMessage> c)
-            {
-                var request = new RequestMessage($"Sample request {i}", delay);
-                var cts = new CancellationTokenSource();
-                var requestTime = TimeSpan.FromMinutes(timeoutMinutes);
-                var heartbeatTime = TimeSpan.FromSeconds(heartbeat);
-                cts.CancelAfter(requestTime);
-                try
-                {
-                    var requestContext = new PipeRequestContext
-                    {
-                        Deadline = requestTime,
-                        Heartbeat = heartbeatTime
-                    };
-                    await Task.Delay(TimeSpan.FromSeconds(rand.Next(0, startUpDelay)));
-                    return (await c.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, cts.Token), null);
-                }
-                catch (Exception e)
-                {
-                    return (null, e);
-                }
-            }    
         }
     }    
 }

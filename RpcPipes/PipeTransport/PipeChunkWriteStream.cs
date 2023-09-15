@@ -5,7 +5,7 @@ namespace RpcPipes.PipeTransport;
 
 public class PipeChunkWriteStream : Stream, IAsyncDisposable
 {
-    private const int _bufferReserved = sizeof(int) + 1;
+    private const int BufferReserved = sizeof(int) + 1;
     private bool _closed;
     private bool _closing;
 
@@ -24,7 +24,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
 
         _buffer = buffer;
         _bufferLength = bufferLength;
-        _bufferPosition = _bufferReserved;
+        _bufferPosition = BufferReserved;
 
         _networkStream = networkStream;
         _cancellation = cancellation;
@@ -42,7 +42,7 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     public async Task WriteString(string message, CancellationToken cancellation)
     {
         var buffer = Encoding.UTF8.GetBytes(message);
-        await WriteAsync(BitConverter.GetBytes(buffer.Length), 0, 4, cancellation);
+        await WriteInteger32(buffer.Length, cancellation);
         await WriteAsync(buffer, 0, buffer.Length, cancellation);
     }
 
@@ -96,27 +96,27 @@ public class PipeChunkWriteStream : Stream, IAsyncDisposable
     {
         if (_closed)
             return;
-        var flushedBytes = _bufferPosition - _bufferReserved;
+        var flushedBytes = _bufferPosition - BufferReserved;
         SetFlushedLength(_buffer, _closing, (int)flushedBytes);
         WriteToNetwork(_buffer, 0, (int)_bufferPosition);
-        _bufferPosition = _bufferReserved;
+        _bufferPosition = BufferReserved;
     }
 
     public override async Task FlushAsync(CancellationToken cancellation)
     {
         if (_closed)
             return;
-        var flushedBytes = _bufferPosition - _bufferReserved;
+        var flushedBytes = _bufferPosition - BufferReserved;
         SetFlushedLength(_buffer, _closing, (int)flushedBytes);
         await WriteToNetworkAsync(_buffer, 0, (int)_bufferPosition, cancellation);
-        _bufferPosition = _bufferReserved;
+        _bufferPosition = BufferReserved;
     }
 
     private void WriteToNetwork(byte[] buffer, int offset, int count)
     {
         try
         {
-            _networkStream.WriteAsync(buffer, offset, count);
+            _networkStream.Write(buffer, offset, count);
         }
         catch (Exception e)
         {

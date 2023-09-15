@@ -10,33 +10,31 @@ namespace RpcPipes.PipeHandlers;
 internal class PipeHeartbeatOutHandler<TP>
     where TP: IPipeHeartbeat
 {
-    private ILogger _logger;
+    private readonly ILogger _logger;
 
-    private PipeMessageDispatcher _connectionPool;
-    private IPipeMessageWriter _messageWriter;
-    private IPipeHeartbeatReceiver<TP> _heartbeatReceiver;
+    private readonly IPipeMessageWriter _messageWriter;
+    private readonly IPipeHeartbeatReceiver<TP> _heartbeatReceiver;
 
     private readonly Channel<PipeClientHeartbeatMessage> _heartBeatsChannel = Channel.CreateUnbounded<PipeClientHeartbeatMessage>();
 
-    public string PipeName { get; }
-    public Task ClientTask { get; private set; } = Task.CompletedTask;
+    public string Pipe { get; }
+    public Task ClientTask { get; }
 
-    public PipeHeartbeatOutHandler(ILogger logger, string pipeName, PipeMessageDispatcher connectionPool, IPipeHeartbeatReceiver<TP> heartbeatReceiver, IPipeMessageWriter messageWriter)
+    public PipeHeartbeatOutHandler(ILogger logger, string pipe, PipeMessageDispatcher connectionPool, IPipeHeartbeatReceiver<TP> heartbeatReceiver, IPipeMessageWriter messageWriter)
     {
         _logger = logger;
-        _connectionPool = connectionPool;
         _messageWriter = messageWriter;
         _heartbeatReceiver = heartbeatReceiver;
 
-        PipeName = pipeName;
-        ClientTask = _connectionPool.ProcessClientMessages(_heartBeatsChannel, GetTargetPipeName, HandleHeartbeatMessage);
+        Pipe = pipe;
+        ClientTask = connectionPool.ProcessClientMessages(_heartBeatsChannel, GetTargetPipeName, HandleHeartbeatMessage);
     }
 
     public ValueTask PublishHeartbeatMessage(PipeClientHeartbeatMessage heartbeatMessage)
         => _heartBeatsChannel.Writer.WriteAsync(heartbeatMessage);
 
     private string GetTargetPipeName(PipeClientHeartbeatMessage heartbeatMessage)
-        => PipeName;
+        => Pipe;
         
     private async Task HandleHeartbeatMessage(
         PipeClientHeartbeatMessage heartbeatMessage, PipeProtocol protocol, CancellationToken cancellation)
@@ -62,7 +60,7 @@ internal class PipeHeartbeatOutHandler<TP>
         }
     }
 
-    private async Task<bool> ReadyForHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, CancellationToken cancellation)
+    private static async Task<bool> ReadyForHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, CancellationToken cancellation)
     {
         var lastCheckInterval = DateTime.Now - heartbeatMessage.HeartbeatCheckTime;
         if (lastCheckInterval < heartbeatMessage.HeartbeatCheckFrequency)
@@ -107,10 +105,10 @@ internal class PipeHeartbeatOutHandler<TP>
             }
         }        
 
-        Task WriteHeartbeat(Stream stream, CancellationToken cancellation)
-            => _messageWriter.WriteData(pipeHeartbeatRequest, stream, cancellation);
+        Task WriteHeartbeat(Stream stream, CancellationToken c)
+            => _messageWriter.WriteData(pipeHeartbeatRequest, stream, c);
 
-        ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken cancellation)
-            => _messageWriter.ReadData<TP>(stream, cancellation);
+        ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken c)
+            => _messageWriter.ReadData<TP>(stream, c);
     }
 }

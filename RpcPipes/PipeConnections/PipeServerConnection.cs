@@ -6,10 +6,10 @@ namespace RpcPipes.PipeConnections;
 
 internal class PipeServerConnection : PipeConnection<NamedPipeServerStream>
 {
-    private ILogger _logger;
-    private int _instances;
-    private int _buffer;
-    private Counter<int> _serverConnectionsCounter;
+    private readonly ILogger _logger;
+    private readonly int _instances;
+    private readonly int _buffer;
+    private readonly Counter<int> _serverConnectionsCounter;
 
     public PipeOptions Options { get; set; } = PipeOptions.Asynchronous | PipeOptions.WriteThrough;
     public PipeDirection Direction => PipeDirection.InOut;
@@ -26,54 +26,54 @@ internal class PipeServerConnection : PipeConnection<NamedPipeServerStream>
 
     protected override async Task<(bool Ok, Exception Error)> TryConnect(CancellationToken cancellation)
     {
-        if (_connected && _connection != null && _connection.IsConnected)
-            return (_connected, null);
+        if (Connected && Connection is { IsConnected: true })
+            return (Connected, null);
         else
         {
             Disconnect("connection dropped");
-            _connection = new NamedPipeServerStream(Name, Direction, _instances, Transmission, Options, _buffer, _buffer);
+            Connection = new NamedPipeServerStream(Name, Direction, _instances, Transmission, Options, _buffer, _buffer);
         }
 
         try
         {
-            _connected = true;
-            await _connection.WaitForConnectionAsync(cancellation);
+            Connected = true;
+            await Connection.WaitForConnectionAsync(cancellation);
             _serverConnectionsCounter.Add(1);
             _logger.LogDebug("connected {Type} pipe of stream pipe {Pipe}", "server", Name);
-            return (_connected, null);
+            return (Connected, null);
         }
         catch (OperationCanceledException ex)
         {
-            _connected = false;
+            Connected = false;
             _logger.LogDebug("connection to {Type} stream pipe {Pipe} closed", "server", Name);
-            return (_connected, ex);
+            return (Connected, ex);
 
         }
         catch (IOException ex)
         {
-            _connected = false;
+            Connected = false;
             _logger.LogDebug(ex, "connection to {Type} stream pipe {Pipe} got interrupted", "server", Name);
-            return (_connected, ex);
+            return (Connected, ex);
         }
         catch (UnauthorizedAccessException ex)
         {
-            _connected = false;
+            Connected = false;
             _logger.LogDebug(ex, "connection to {Type} stream pipe {Pipe} got Unauthorized error", "client", Name);
-            return (_connected, ex);
+            return (Connected, ex);
         }
         catch (Exception ex)
         {
-            _connected = false;
+            Connected = false;
             _logger.LogError(ex, "connection to {Type} stream pipe {Pipe} got unhandled error", "server", Name);
-            return (_connected, ex);
+            return (Connected, ex);
         }
     }
 
     public override void Disconnect(string reason)
     {
-        if (_connection == null)
+        if (Connection == null)
         {
-            _connected = false;
+            Connected = false;
             return;
         }
 
@@ -81,20 +81,20 @@ internal class PipeServerConnection : PipeConnection<NamedPipeServerStream>
         {
             try
             {
-                if (_connected)
+                if (Connected)
                 {
                     _logger.LogDebug("disconnected {Type} pipe of stream pipe {Pipe}, reason '{Reason}'",
                         "server", Name, reason);
                     _serverConnectionsCounter.Add(-1);
-                    if (_connection.IsConnected)
-                        _connection.Disconnect();
+                    if (Connection.IsConnected)
+                        Connection.Disconnect();
                 }
             }
             finally
             {
-                _connected = false;
-                _connection.Dispose();
-                _connection = null;
+                Connected = false;
+                Connection.Dispose();
+                Connection = null;
             }
         }
         catch (Exception e)

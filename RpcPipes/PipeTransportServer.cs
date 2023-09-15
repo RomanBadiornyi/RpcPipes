@@ -12,20 +12,20 @@ namespace RpcPipes;
 
 public class PipeTransportServer    
 {
-    class RequestResponse<TReq, TRep>
+    private class PipeRequestResponse<TReq, TRep>
     {
         public PipeServerRequestMessage Handle { get; set; }
         public PipeMessageRequest<TReq> RequestMessage { get; set; }
         public PipeMessageResponse<TRep> ResponseMessage { get; set; }
     }
     
-    private static Meter _meter = new(nameof(PipeTransportServer));
+    private static readonly Meter Meter = new(nameof(PipeTransportServer));
 
-    private ILogger<PipeTransportServer> _logger;
-    private string _receivePipe;
-    private string _heartbeatPipe;
-    private int _instances;
-    private IPipeMessageWriter _messageWriter;
+    private readonly ILogger<PipeTransportServer> _logger;
+    private readonly string _receivePipe;
+    private readonly string _heartbeatPipe;
+    private readonly int _instances;
+    private readonly IPipeMessageWriter _messageWriter;
 
     private readonly object _sync = new();
     private bool _started;
@@ -38,8 +38,6 @@ public class PipeTransportServer
 
     public PipeConnectionPool ConnectionPool { get; private set; }
     public PipeMessageDispatcher MessageDispatcher { get; private set; }
-
-    public CancellationTokenSource Cancellation => _connectionsCancellation;
 
     public PipeTransportServer(
         ILogger<PipeTransportServer> logger, string pipePrefix, int instances, IPipeMessageWriter messageWriter)
@@ -71,10 +69,10 @@ public class PipeTransportServer
 
             _connectionsCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-            var requests = new ConcurrentDictionary<Guid, RequestResponse<TReq, TRep>>();
+            var requests = new ConcurrentDictionary<Guid, PipeRequestResponse<TReq, TRep>>();
             var headerBuffer = 1 * 1024;
             var contentBuffer = 4 * 1024;
-            ConnectionPool = new PipeConnectionPool(_logger, _meter, _instances, contentBuffer, _connectionsCancellation.Token);
+            ConnectionPool = new PipeConnectionPool(_logger, Meter, _instances, contentBuffer, _connectionsCancellation.Token);
             MessageDispatcher = new PipeMessageDispatcher(_logger, ConnectionPool, _instances, headerBuffer, contentBuffer, _connectionsCancellation.Token);
 
             HeartbeatIn = new PipeHeartbeatInHandler(_logger, _heartbeatPipe, MessageDispatcher, _messageWriter);
@@ -88,7 +86,7 @@ public class PipeTransportServer
                 )
                 //wait also until we complete all client connections
                 .ContinueWith(_ => ReplyOut.ClientTask, CancellationToken.None).Unwrap()
-                .ContinueWith(_ => ConnectionPool.DisposeAsync().AsTask()).Unwrap()
+                .ContinueWith(_ => ConnectionPool.DisposeAsync().AsTask(), CancellationToken.None).Unwrap()
                 .ContinueWith(_ => { _logger.LogDebug("server has been stopped"); }, CancellationToken.None);
 
             _started = true;
@@ -101,11 +99,11 @@ public class PipeTransportServer
 
     private bool SetupRequest<TReq, TRep>(
         PipeServerRequestMessage requestMessage, 
-        ConcurrentDictionary<Guid, RequestResponse<TReq, TRep>> requests, 
+        ConcurrentDictionary<Guid, PipeRequestResponse<TReq, TRep>> requests, 
         IPipeMessageHandler<TReq, TRep> messageHandler,
         IPipeHeartbeatHandler heartbeatHandler)
     {
-        var requestContainer = new RequestResponse<TReq, TRep> 
+        var requestContainer = new PipeRequestResponse<TReq, TRep> 
         {
             Handle = requestMessage,
             RequestMessage = new PipeMessageRequest<TReq>(), 
@@ -123,7 +121,7 @@ public class PipeTransportServer
         return false;
     }
 
-    private async Task<bool> ReadRequest<TReq, TRep>(RequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
+    private async Task<bool> ReadRequest<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
     {
         try
         {
@@ -144,7 +142,7 @@ public class PipeTransportServer
     private async Task RunRequest<TReq, TRep>(
         IPipeMessageHandler<TReq, TRep> messageHandler, 
         IPipeHeartbeatHandler heartbeatHandler,
-        RequestResponse<TReq, TRep> requestContainer, 
+        PipeRequestResponse<TReq, TRep> requestContainer, 
         CancellationTokenSource cancellation)
     {
         heartbeatHandler.StartMessageExecute(requestContainer.Handle.Id, requestContainer.RequestMessage.Request);            
@@ -174,18 +172,18 @@ public class PipeTransportServer
         await ReplyOut.PublishResponseMessage(requestContainer.Handle);
     }
 
-    private async Task SendRequest<TReq, TRep>(RequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
+    private async Task SendRequest<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
     {
         _logger.LogDebug("sending reply for message {MessageId} back to client", requestContainer.Handle.Id);
         var pipeMessageHeader = new PipeMessageHeader { MessageId = requestContainer.Handle.Id };
         await protocol.TransferMessage(pipeMessageHeader, Write, cancellation);
         _logger.LogDebug("sent reply for message {MessageId} back to client", requestContainer.Handle.Id);
 
-       Task Write(Stream stream, CancellationToken cancellation)
-            => _messageWriter.WriteResponse(requestContainer.ResponseMessage, stream, cancellation);        
+       Task Write(Stream stream, CancellationToken c)
+            => _messageWriter.WriteResponse(requestContainer.ResponseMessage, stream, c);        
     }
 
-    private bool ReportError<TReq, TRep>(RequestResponse<TReq, TRep> requestContainer, Exception exception)
+    private bool ReportError<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, Exception exception)
     {
         if (requestContainer.ResponseMessage.Reply != null && requestContainer.ResponseMessage.ReplyError == null)
         {

@@ -5,21 +5,18 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeConnections;
 
-public partial class PipeConnectionPool : IAsyncDisposable
+public class PipeConnectionPool : IAsyncDisposable
 {
-    private ILogger _logger;
-    private Meter _meter;
+    private readonly ILogger _logger;
+    private readonly Meter _meter;
 
     private Timer _expiryTimer;
-    private int _expiryCheckIntervalMilliseconds = 500;
-    private int _expiryCleanupTimeout = 50;
+    private readonly int _expiryCheckIntervalMilliseconds = 500;
+    private readonly int _expiryCleanupTimeout = 50;
 
-    //prevents running connections cleanup concurrently
-    private SemaphoreSlim _connectionCleanLock = new SemaphoreSlim(1);
-
-    private CancellationToken _cancellation;
-    private ConcurrentDictionary<string, PipeConnectionGroup<PipeServerConnection>> _connectionsServer = new();
-    private ConcurrentDictionary<string, PipeConnectionGroup<PipeClientConnection>> _connectionsClient = new();
+    private readonly CancellationToken _cancellation;
+    private readonly ConcurrentDictionary<string, PipeConnectionGroup<PipeServerConnection>> _connectionsServer = new();
+    private readonly ConcurrentDictionary<string, PipeConnectionGroup<PipeClientConnection>> _connectionsClient = new();
 
     public int Instances { get; }
     public int Buffer { get; }
@@ -29,9 +26,9 @@ public partial class PipeConnectionPool : IAsyncDisposable
     public TimeSpan ConnectionRetryTimeout = TimeSpan.FromSeconds(5);
     public TimeSpan ConnectionDisposeTimeout = TimeSpan.FromSeconds(10);
 
-    public IEnumerable<IPipeConnection<NamedPipeServerStream>> ConnectionsServer =>
+    public IEnumerable<PipeConnection<NamedPipeServerStream>> ConnectionsServer =>
         _connectionsServer.Values.SelectMany(pool => pool.Connections);
-    public IEnumerable<IPipeConnection<NamedPipeClientStream>> ConnectionsClient =>
+    public IEnumerable<PipeConnection<NamedPipeClientStream>> ConnectionsClient =>
         _connectionsClient.Values.SelectMany(pool => pool.Connections);
 
     public PipeConnectionPool(ILogger logger, Meter meter, int instances, int buffer, CancellationToken cancellation)
@@ -51,7 +48,7 @@ public partial class PipeConnectionPool : IAsyncDisposable
         if (_cancellation.IsCancellationRequested)
             return;
 
-        _expiryTimer = new Timer(async _ => { await Cleanup(); }, this, 0, _expiryCheckIntervalMilliseconds);
+        _expiryTimer = new Timer(_ => Cleanup(), this, 0, _expiryCheckIntervalMilliseconds);
     }
 
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseClientConnection(
@@ -92,27 +89,18 @@ public partial class PipeConnectionPool : IAsyncDisposable
             => new(_logger, _meter, id, name, Instances, Buffer, ConnectionRetryTimeout, ConnectionExpiryTimeout);
     }
 
-    public async Task Cleanup()
+    public void Cleanup()
     {
-        if (!await _connectionCleanLock.WaitAsync(_expiryCleanupTimeout))
-            return;
-        try
-        {
-            var currentTime = DateTime.UtcNow;
+        var currentTime = DateTime.UtcNow;
 
-            Release(_connectionsClient, ShouldCleanupClient, "expired");
-            Release(_connectionsServer, ShouldCleanupServer, "expired");
+        Release(_connectionsClient, ShouldCleanupClient, "expired");
+        Release(_connectionsServer, ShouldCleanupServer, "expired");
 
-            bool ShouldCleanupClient(IPipeConnection connection)
-                => !connection.InUse && connection.VerifyIfExpired(currentTime);
+        bool ShouldCleanupClient(IPipeConnection connection)
+            => !connection.InUse && connection.VerifyIfExpired(currentTime);
 
-            bool ShouldCleanupServer(IPipeConnection connection)
-                => !connection.VerifyIfConnected() && connection.VerifyIfExpired(currentTime);
-        }
-        finally
-        {
-            _connectionCleanLock.Release();
-        }
+        bool ShouldCleanupServer(IPipeConnection connection)
+            => !connection.VerifyIfConnected() && connection.VerifyIfExpired(currentTime);
     }
 
     private async ValueTask<(T Connection, PipeConnectionGroup<T> ConnectionPool, Exception Error)> Get<T>(
@@ -131,16 +119,15 @@ public partial class PipeConnectionPool : IAsyncDisposable
                 continue;
             if (connectionPool.BorrowConnection(out connection))
                 break;
-            if (tries < 10)
-                await Task.Delay(TimeSpan.FromSeconds(_expiryCleanupTimeout));
+            await Task.Delay(TimeSpan.FromSeconds(_expiryCleanupTimeout), _cancellation);                
             tries++;
         }
         if (connection == null)
-            return (null, null, new IndexOutOfRangeException($"Run out of available connections on the pool {connectionPool.Name}"));
+            return (null, null, new IndexOutOfRangeException($"Run out of available connections on the pool {pipeName}"));
         return (connection, connectionPool, null);
     }
 
-    private void Put<T>(
+    private static void Put<T>(
         ConcurrentDictionary<string, PipeConnectionGroup<T>> connections,
         PipeConnectionGroup<T> connectionPool,
         T connection,
@@ -220,16 +207,9 @@ public partial class PipeConnectionPool : IAsyncDisposable
 
         using var cancellationSource = new CancellationTokenSource();
         cancellationSource.CancelAfter(ConnectionDisposeTimeout);
-
-        await _connectionCleanLock.WaitAsync(cancellationSource.Token);
-        try
-        {
-            Release(_connectionsClient, c => true, "disposed");
-            Release(_connectionsServer, c => true, "disposed");
-        }
-        finally
-        {
-            _connectionCleanLock.Release();
-        }
+        
+        Release(_connectionsClient, _ => true, "disposed");
+        Release(_connectionsServer, _ => true, "disposed");
+        await Task.CompletedTask;
     }
 }

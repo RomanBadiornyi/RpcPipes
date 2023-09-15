@@ -11,9 +11,8 @@ namespace RpcPipes;
 public class PipeMessageDispatcher
 {
     private readonly ILogger _logger;
-
-    private CancellationToken _cancellation;
-    private PipeConnectionPool _connectionPool;
+    private readonly CancellationToken _cancellation;
+    private readonly PipeConnectionPool _connectionPool;
 
     public int Instances { get; }
     public int HeaderBufferSize { get; }

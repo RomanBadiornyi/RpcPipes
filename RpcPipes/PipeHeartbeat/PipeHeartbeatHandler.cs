@@ -5,7 +5,7 @@ namespace RpcPipes.PipeHeartbeat;
 public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
     where TOut : IPipeHeartbeat
 {
-    private readonly ConcurrentDictionary<Guid, (IPipeHeartbeatReporter<TOut> Reporter, CancellationTokenSource Cancellation)> messageHandleByMessageId = new();
+    private readonly ConcurrentDictionary<Guid, (IPipeHeartbeatReporter<TOut> Reporter, CancellationTokenSource Cancellation)> _messageHandleByMessageId = new();
     private readonly ConcurrentDictionary<Guid, object> _messageByMessageId = new();
 
     protected abstract TOut GetNotStartedHeartbeat();
@@ -14,7 +14,7 @@ public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
     public bool StartMessageHandling(Guid messageId, CancellationToken token, IPipeHeartbeatReporter heartbeatReporter)
     {
         var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(token);
-        return messageHandleByMessageId.TryAdd(messageId, (heartbeatReporter as IPipeHeartbeatReporter<TOut>, cancellationSource));
+        return _messageHandleByMessageId.TryAdd(messageId, (heartbeatReporter as IPipeHeartbeatReporter<TOut>, cancellationSource));
     }
 
     public void StartMessageExecute(Guid messageId, object message)
@@ -24,7 +24,7 @@ public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
 
     public bool TryGetMessageCancellation(Guid messageId, out CancellationTokenSource cancellation)
     {
-        if (messageHandleByMessageId.TryGetValue(messageId, out var handle))
+        if (_messageHandleByMessageId.TryGetValue(messageId, out var handle))
         {
             cancellation = handle.Cancellation;
             return true;
@@ -35,7 +35,7 @@ public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
 
     public virtual TOut HeartbeatMessage(Guid messageId)
     {
-        if (messageHandleByMessageId.TryGetValue(messageId, out var handle))
+        if (_messageHandleByMessageId.TryGetValue(messageId, out var handle))
         {
             var heartbeatReporter = handle.Reporter; 
             if (heartbeatReporter != null && _messageByMessageId.TryGetValue(messageId, out var message))
@@ -60,7 +60,7 @@ public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
 
     public bool EndMessageHandling(Guid messageId)
     {
-        if (messageHandleByMessageId.TryRemove(messageId, out var handle)) 
+        if (_messageHandleByMessageId.TryRemove(messageId, out var handle)) 
         {
             handle.Cancellation.Dispose();
             return true;

@@ -13,27 +13,27 @@ namespace RpcPipes.Tests.PipeClientServer;
 
 public class BasePipeClientServerTests
 {
-    protected TimeSpan _clientRequestTimeout = TimeSpan.FromDays(1);
-    protected TimeSpan _serverTimeout = TimeSpan.FromDays(1);
-    
     private ServiceProvider _serviceProvider;
 
-    protected Dictionary<string, int> _messages;
-    protected Dictionary<string, int> _connections;
-    protected MeterListener _meterListener;
+    protected TimeSpan ClientRequestTimeout = TimeSpan.FromDays(1);
+    protected TimeSpan ServerTimeout = TimeSpan.FromDays(1);
+        
+    protected Dictionary<string, int> Messages;
+    protected Dictionary<string, int> Connections;
+    protected MeterListener MeterListener;
 
-    protected CancellationTokenSource _serverStop;
-    protected Task _serverTask;
+    protected CancellationTokenSource ServerStop;
+    protected Task ServerTask;
 
-    protected ILogger _testsLogger;
-    protected ILogger<PipeTransportServer> _serverLogger;    
-    protected ILogger<PipeTransportClient<HeartbeatMessage>> _clientLogger;
+    protected ILogger TestsLogger;
+    protected ILogger<PipeTransportServer> ServerLogger;    
+    protected ILogger<PipeTransportClient<PipeHeartbeatMessage>> ClientLogger;
 
-    protected PipeSerializer _serializer;
-    protected PipeMessageHandler _messageHandler;
-    protected PipeHeartbeatMessageHandler _heartbeatHandler;
-    protected ConcurrentBag<HeartbeatMessage> _heartbeatReplies;
-    protected PipeHeartbeatReceiver _heartbeatMessageReceiver;    
+    protected PipeSerializer Serializer;
+    protected PipeMessageHandler MessageHandler;
+    protected PipeHeartbeatMessageHandler HeartbeatHandler;
+    protected ConcurrentBag<PipeHeartbeatMessage> HeartbeatReplies;
+    protected PipeHeartbeatReceiver HeartbeatMessageReceiver;    
 
     [OneTimeSetUp]
     public void SetupTimeouts()
@@ -41,8 +41,8 @@ public class BasePipeClientServerTests
         //if we are not debugging tests - ensure that they don't hang due to deadlocks and enforce client/server to be cancelled after timeout 
         if (!Debugger.IsAttached)
         {
-            _clientRequestTimeout = TimeSpan.FromSeconds(20);
-            _serverTimeout = TimeSpan.FromSeconds(20);
+            ClientRequestTimeout = TimeSpan.FromSeconds(20);
+            ServerTimeout = TimeSpan.FromSeconds(20);
         }
     }
 
@@ -50,39 +50,39 @@ public class BasePipeClientServerTests
     public void ListenMetrics()
     {
         StartMetrics();
-        _meterListener = new MeterListener
+        MeterListener = new MeterListener
         {
             InstrumentPublished = (instrument, listener) =>
             {
-                if (_messages.ContainsKey($"{instrument.Name}"))
+                if (Messages.ContainsKey($"{instrument.Name}"))
                     listener.EnableMeasurementEvents(instrument);
-                if (_connections.ContainsKey($"{instrument.Meter.Name}.{instrument.Name}"))
+                if (Connections.ContainsKey($"{instrument.Meter.Name}.{instrument.Name}"))
                     listener.EnableMeasurementEvents(instrument);
             }
         };
-        _meterListener.SetMeasurementEventCallback<int>(OnMeasurementRecorded);
-        _meterListener.Start();        
+        MeterListener.SetMeasurementEventCallback<int>(OnMeasurementRecorded);
+        MeterListener.Start();        
 
         void OnMeasurementRecorded(Instrument instrument, int measurement, ReadOnlySpan<KeyValuePair<string, object>> tags, object state)
         {
-            lock(_messages) 
+            lock(Messages) 
             {
                 var id = $"{instrument.Name}";
-                if (_messages.TryGetValue(id, out var current))
+                if (Messages.TryGetValue(id, out var current))
                 {
                     var next = current + measurement;                    
-                    _messages[id] = next;
-                    _testsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
+                    Messages[id] = next;
+                    TestsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
                 }                
             }
-            lock(_connections) 
+            lock(Connections) 
             {
                 var id = $"{instrument.Meter.Name}.{instrument.Name}";
-                if (_connections.TryGetValue(id, out var current))
+                if (Connections.TryGetValue(id, out var current))
                 {
                     var next = current + measurement;                    
-                    _connections[id] = next;
-                    _testsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
+                    Connections[id] = next;
+                    TestsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
                 }
             }            
         }
@@ -97,41 +97,41 @@ public class BasePipeClientServerTests
                 loggingBuilder.SetMinimumLevel(LogLevel.Trace);
                 loggingBuilder.AddNUnitLogger();
             }).BuildServiceProvider();
-        _clientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<HeartbeatMessage>>>();
-        _serverLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
-        _testsLogger = _serviceProvider.GetRequiredService<ILogger<BasePipeClientServerTests>>();
-        _testsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");        
+        ClientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeHeartbeatMessage>>>();
+        ServerLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
+        TestsLogger = _serviceProvider.GetRequiredService<ILogger<BasePipeClientServerTests>>();
+        TestsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");        
     }
 
     [TearDown]
     public void CleanupLogging()
     {                        
         _serviceProvider.Dispose();
-        _testsLogger.LogInformation($"=== end   {TestContext.CurrentContext.Test.Name} ===");
+        TestsLogger.LogInformation($"=== end   {TestContext.CurrentContext.Test.Name} ===");
     }
 
     [SetUp]
     public void SetupDependencies()
     {
-        _serializer = new PipeSerializer();
+        Serializer = new PipeSerializer();
 
-        _messageHandler = new PipeMessageHandler();
-        _heartbeatHandler = new PipeHeartbeatMessageHandler();
+        MessageHandler = new PipeMessageHandler();
+        HeartbeatHandler = new PipeHeartbeatMessageHandler();
 
-        _heartbeatReplies = new ConcurrentBag<HeartbeatMessage>();
-        _heartbeatMessageReceiver = new PipeHeartbeatReceiver(_heartbeatReplies);        
+        HeartbeatReplies = new ConcurrentBag<PipeHeartbeatMessage>();
+        HeartbeatMessageReceiver = new PipeHeartbeatReceiver(HeartbeatReplies);        
     }
 
     [TearDown]
     public void CleanupDependencies()
     {
-        _heartbeatReplies.Clear();
+        HeartbeatReplies.Clear();
     }         
 
     [SetUp]
     public void StartMetrics()
     {
-        _messages = new Dictionary<string, int>
+        Messages = new Dictionary<string, int>
         {
             { "sent-messages", 0 },
             { "received-messages", 0 },
@@ -141,7 +141,7 @@ public class BasePipeClientServerTests
             { "reply-messages", 0 },                        
             { "handled-messages", 0 }
         };
-        _connections = new Dictionary<string, int>
+        Connections = new Dictionary<string, int>
         {
             { "PipeTransportClient.server-connections", 0 },
             { "PipeTransportClient.client-connections", 0 },
@@ -153,24 +153,24 @@ public class BasePipeClientServerTests
     [TearDown]
     public void CleanupMetrics()
     {        
-        _messages.Clear();
-        _connections.Clear();
+        Messages.Clear();
+        Connections.Clear();
     }
 
     [SetUp]
     public void SetupServer()   
     {        
-        _serverStop = new CancellationTokenSource();
-        _serverStop.CancelAfter(_serverTimeout);
-        _serverTask = Task.CompletedTask;
+        ServerStop = new CancellationTokenSource();
+        ServerStop.CancelAfter(ServerTimeout);
+        ServerTask = Task.CompletedTask;
     }
 
     [TearDown]
     public void CleanupServer()   
     {
-        if (!_serverStop.IsCancellationRequested)
-            _serverStop.Cancel();        
-        _serverTask.Wait();
-        _serverStop.Dispose();
+        if (!ServerStop.IsCancellationRequested)
+            ServerStop.Cancel();        
+        ServerTask.Wait();
+        ServerStop.Dispose();
     }
 }

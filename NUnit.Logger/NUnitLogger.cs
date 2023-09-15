@@ -26,11 +26,10 @@ public sealed class NUnitLogger : ILogger
         }
         
         var time = DateTime.Now.ToString("u");
-        var message = $"{formatter(state, null)}";
+        var message = formatter(state, null);
         if (message == null && exception != null)
             message = exception.Message;
-        if (message == null)
-            message = "";
+        message ??= "";
 
         var level = logLevel.ToString().ToLower();
         TestContext.Out.WriteLine($"{time} [{level}]: {_name} - {message}");

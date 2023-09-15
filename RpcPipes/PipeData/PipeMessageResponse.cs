@@ -13,7 +13,7 @@ public class PipeMessageResponse<T>
     private PipeMessageException CreateRequestException(Exception ex)
     {
         var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        var isDevelopment = environment == null || environment?.ToLower() == "development";
+        var isDevelopment = environment == null || environment.ToLower() == "development";
 
         return new PipeMessageException
         {

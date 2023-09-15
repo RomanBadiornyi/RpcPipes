@@ -6,8 +6,8 @@ namespace RpcPipes.PipeConnections;
 
 internal class PipeClientConnection : PipeConnection<NamedPipeClientStream>
 {
-    private ILogger _logger;
-    private Counter<int> _clientConnectionsCounter;
+    private readonly ILogger _logger;
+    private readonly Counter<int> _clientConnectionsCounter;
 
     public TimeSpan ConnectionTimeout { get; }
     
@@ -24,54 +24,54 @@ internal class PipeClientConnection : PipeConnection<NamedPipeClientStream>
 
     protected override async Task<(bool Ok, Exception Error)> TryConnect(CancellationToken cancellation)
     {
-        if (_connected && _connection != null && _connection.IsConnected)
-            return (_connected, null);
+        if (Connected && Connection is { IsConnected: true })
+            return (Connected, null);
         else
         {
             Disconnect("connection dropped");
-            _connection = new NamedPipeClientStream(".", Name, Direction, Options);
+            Connection = new NamedPipeClientStream(".", Name, Direction, Options);
         }
 
         using var connectionCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         connectionCancellationSource.CancelAfter(ConnectionTimeout);
         try
         {
-            _connected = true;
-            await _connection.ConnectAsync(Timeout.Infinite, connectionCancellationSource.Token);
+            Connected = true;
+            await Connection.ConnectAsync(Timeout.Infinite, connectionCancellationSource.Token);
             _clientConnectionsCounter.Add(1);
             _logger.LogDebug("connected {Type} pipe of stream pipe {Pipe}", "client", Name);
-            return (_connected, null);
+            return (Connected, null);
         }
         catch (OperationCanceledException ex)
         {
-            _connected = false;
-            return (_connected, new TimeoutException("client connection timeout", ex));
+            Connected = false;
+            return (Connected, new TimeoutException("client connection timeout", ex));
         }
         catch (IOException ex)
         {
-            _connected = false;
+            Connected = false;
             _logger.LogDebug(ex, "connection to {Type} stream pipe {Pipe} got interrupted", "client", Name);
-            return (_connected, ex);
+            return (Connected, ex);
         }
         catch (UnauthorizedAccessException ex)
         {
-            _connected = false;
+            Connected = false;
             _logger.LogDebug(ex, "connection to {Type} stream pipe {Pipe} got Unauthorized error", "client", Name);
-            return (_connected, ex);
+            return (Connected, ex);
         }
         catch (Exception ex)
         {
-            _connected = false;
+            Connected = false;
             _logger.LogError(ex, "connection to {Type} stream pipe {Pipe} got unhandled error", "client", Name);
-            return (_connected, ex);
+            return (Connected, ex);
         }
     }
 
     public override void Disconnect(string reason)
     {
-        if (_connection == null)
+        if (Connection == null)
         {
-            _connected = false;
+            Connected = false;
             return;
         }
 
@@ -79,19 +79,19 @@ internal class PipeClientConnection : PipeConnection<NamedPipeClientStream>
         {
             try
             {
-                if (_connected)
+                if (Connected)
                 {
                     _logger.LogDebug("disconnected {Type} pipe of stream pipe {Pipe}, reason '{Reason}'",
                         "client", Name, reason);
                     _clientConnectionsCounter.Add(-1);
-                    _connection.Close();
+                    Connection.Close();
                 }                
             }
             finally
             {
-                _connected = false;
-                _connection.Dispose();
-                _connection = null;
+                Connected = false;
+                Connection.Dispose();
+                Connection = null;
             }
         }
         catch (Exception e)

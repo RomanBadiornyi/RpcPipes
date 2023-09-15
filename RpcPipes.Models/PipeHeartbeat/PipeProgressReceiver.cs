@@ -3,16 +3,16 @@ using RpcPipes.PipeHeartbeat;
 
 namespace RpcPipes.Models.PipeHeartbeat;
 
-public class PipeHeartbeatReceiver : IPipeHeartbeatReceiver<HeartbeatMessage>
+public class PipeHeartbeatReceiver : IPipeHeartbeatReceiver<PipeHeartbeatMessage>
 {
-    public ConcurrentBag<HeartbeatMessage> ProgressMessages { get; }
+    public ConcurrentBag<PipeHeartbeatMessage> ProgressMessages { get; }
 
-    public PipeHeartbeatReceiver(ConcurrentBag<HeartbeatMessage> progressMessages)
+    public PipeHeartbeatReceiver(ConcurrentBag<PipeHeartbeatMessage> progressMessages)
     {
         ProgressMessages = progressMessages;
     }
     
-    public Task OnHeartbeatMessage(HeartbeatMessage progress)
+    public Task OnHeartbeatMessage(PipeHeartbeatMessage progress)
     {
         ProgressMessages.Add(progress);
         return Task.CompletedTask;

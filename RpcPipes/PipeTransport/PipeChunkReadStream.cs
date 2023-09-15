@@ -5,7 +5,7 @@ namespace RpcPipes.PipeTransport;
 
 public class PipeChunkReadStream : Stream, IAsyncDisposable
 {
-    private const int _bufferReserved = sizeof(int) + 1;
+    private const int BufferReserved = sizeof(int) + 1;
     private bool _closed;
 
     private readonly byte[] _buffer;
@@ -23,7 +23,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
 
         _buffer = buffer;
         _bufferLengthCurrent = bufferLength;
-        _bufferPosition = _bufferReserved;
+        _bufferPosition = BufferReserved;
 
         _networkStream = networkStream;
         _cancellation = cancellation;
@@ -61,13 +61,11 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
 
     public async Task<bool> TryReadString(Action<string> onRead, CancellationToken cancellation)
     {
-        var buffer = new byte[4];
-        var readCount = await ReadAsync(buffer, 0, 4, cancellation);
-        if (readCount < 4)
+        var stringLength = 0;
+        if (!await TryReadInteger32(length => stringLength = length, cancellation))
             return false;
-        var stringLength = BitConverter.ToInt32(buffer, 0);
         var stringBuffer = new byte[stringLength];
-        readCount = await ReadAsync(stringBuffer, 0, stringBuffer.Length, cancellation);
+        var readCount = await ReadAsync(stringBuffer, 0, stringBuffer.Length, cancellation);
         if (readCount != stringBuffer.Length)
             return false;
         onRead.Invoke(Encoding.UTF8.GetString(stringBuffer));
@@ -96,7 +94,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
 
         while (bufferReadTotal < count && (_bufferLengthCurrent - _bufferPosition > 0 || !_closed))
         {
-            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == _bufferReserved)
+            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == BufferReserved)
                 FillBuffer();
 
             var bufferReadCount = Math.Min(count - bufferClientPosition, _bufferLengthCurrent - _bufferPosition);
@@ -118,7 +116,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
 
         while (bufferReadTotal < count && (_bufferLengthCurrent - _bufferPosition > 0 || !_closed))
         {
-            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == _bufferReserved)
+            if (_bufferPosition == _bufferLengthCurrent || _bufferPosition == BufferReserved)
                 await FillBufferAsync(cancellation);
 
             var bufferReadCount = Math.Min(count - bufferClientPosition, _bufferLengthCurrent - _bufferPosition);
@@ -173,17 +171,17 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
     {
         if (_closed)
             return;
-        _bufferPosition = _bufferReserved;
-        _bufferLengthCurrent = _bufferReserved;
-        var readCount = ReadFromNetwork(_buffer, 0, _bufferReserved);
-        if (readCount != _bufferReserved)
+        _bufferPosition = BufferReserved;
+        _bufferLengthCurrent = BufferReserved;
+        var readCount = ReadFromNetwork(_buffer, 0, BufferReserved);
+        if (readCount != BufferReserved)
             _closed = true;
         if (_closed)
             return;
         _closed = _buffer[0] == 1;
         var readLength = BitConverter.ToInt32(_buffer, 1);
 
-        readCount = ReadFromNetwork(_buffer, _bufferReserved, readLength);
+        readCount = ReadFromNetwork(_buffer, BufferReserved, readLength);
         _bufferLengthCurrent += readCount;
         if (readCount != readLength)
             _closed = true;
@@ -193,17 +191,17 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
     {
         if (_closed)
             return;
-        _bufferPosition = _bufferReserved;
-        _bufferLengthCurrent = _bufferReserved;
-        var readCount = await ReadFromNetworkAsync(_buffer, 0, _bufferReserved, cancellation);
-        if (readCount != _bufferReserved)
+        _bufferPosition = BufferReserved;
+        _bufferLengthCurrent = BufferReserved;
+        var readCount = await ReadFromNetworkAsync(_buffer, 0, BufferReserved, cancellation);
+        if (readCount != BufferReserved)
             _closed = true;
         if (_closed)
             return;
         _closed = _buffer[0] == 1;
         var readLength = BitConverter.ToInt32(_buffer, 1);
 
-        readCount = await ReadFromNetworkAsync(_buffer, _bufferReserved, readLength, cancellation);
+        readCount = await ReadFromNetworkAsync(_buffer, BufferReserved, readLength, cancellation);
         _bufferLengthCurrent += readCount;
         if (readCount != readLength)
             _closed = true;

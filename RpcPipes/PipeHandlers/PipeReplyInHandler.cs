@@ -7,27 +7,26 @@ namespace RpcPipes.PipeHandlers;
 
 internal class PipeReplyInHandler
 {
-    private static Meter _meter = new(nameof(PipeReplyInHandler));
-    private static Counter<int> _receivedMessagesCounter = _meter.CreateCounter<int>("received-messages");
+    private static readonly Meter Meter = new(nameof(PipeReplyInHandler));
+    private static readonly Counter<int> ReceivedMessagesCounter = Meter.CreateCounter<int>("received-messages");
     
-    private ILogger _logger;
-    
-    private PipeMessageDispatcher _connectionPool;
+    private readonly ILogger _logger;
+    private readonly PipeMessageDispatcher _connectionPool;
 
-    public string PipeName { get; }
+    public string Pipe { get; }
 
-    public PipeReplyInHandler(ILogger logger, string pipeName, PipeMessageDispatcher connectionPool)
+    public PipeReplyInHandler(ILogger logger, string pipe, PipeMessageDispatcher connectionPool)
     {
         _logger = logger;
         _connectionPool = connectionPool;
-        PipeName = pipeName;
+        Pipe = pipe;
     }
 
     public Task Start(Func<Guid, PipeClientRequestMessage> requestProvider)
     {
-        return _connectionPool.ProcessServerMessages(PipeName, ReceiveMessage);
+        return _connectionPool.ProcessServerMessages(Pipe, InvokeReceiveMessage);
 
-        Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
+        Task InvokeReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
             => HandleReceiveMessage(requestProvider, protocol, cancellation);
     }
 
@@ -83,7 +82,7 @@ internal class PipeReplyInHandler
         }
         finally
         {                
-            _receivedMessagesCounter.Add(1);
+            ReceivedMessagesCounter.Add(1);
             _logger.LogDebug("completed processing of reply message {MessageId}", requestMessage.Id);                
         }
     }

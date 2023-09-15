@@ -18,19 +18,18 @@ public class PipeRequestContext
 
 public abstract class PipeTransportClient
 {
+    protected readonly static Meter Meter = new(nameof(PipeTransportClient));
     public abstract Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken cancellation);
 }
 
 public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncDisposable
     where TP : IPipeHeartbeat
-{
-    private static Meter _meter = new(nameof(PipeTransportClient));
+{    
     private readonly ILogger<PipeTransportClient<TP>> _logger;
 
     private readonly IPipeMessageWriter _messageWriter;
 
     private readonly Task _connectionsTasks;
-    private readonly CancellationTokenSource _connectionsCancellation;
 
     private readonly ConcurrentDictionary<Guid, PipeClientRequestMessage> _requestQueue = new();
 
@@ -41,7 +40,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     public PipeConnectionPool ConnectionPool { get; }
     public PipeMessageDispatcher MessageDispatcher { get; }
 
-    public CancellationTokenSource Cancellation => _connectionsCancellation;
+    public CancellationTokenSource Cancellation { get; }
 
     public PipeTransportClient(
         ILogger<PipeTransportClient<TP>> logger,
@@ -54,12 +53,12 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         _logger = logger;
         _messageWriter = messageWriter;
 
-        _connectionsCancellation = new CancellationTokenSource();
+        Cancellation = new CancellationTokenSource();
 
         var headerBuffer = 1 * 1024;
         var contentBuffer = 4 * 1024;
-        ConnectionPool = new PipeConnectionPool(logger, _meter, instances, contentBuffer, _connectionsCancellation.Token);
-        MessageDispatcher = new PipeMessageDispatcher(logger, ConnectionPool, instances, headerBuffer, contentBuffer, _connectionsCancellation.Token);
+        ConnectionPool = new PipeConnectionPool(logger, Meter, instances, contentBuffer, Cancellation.Token);
+        MessageDispatcher = new PipeMessageDispatcher(logger, ConnectionPool, instances, headerBuffer, contentBuffer, Cancellation.Token);
 
         //limitation on unix
         const int maxPipeLength = 108;
@@ -67,7 +66,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         var sendPipe = $"{pipePrefix}";
         if (sendPipe.Length > maxPipeLength)
             throw new ArgumentOutOfRangeException($"send pipe {sendPipe} too long, limit is {maxPipeLength}");
-        var heartBeatPipe = $"{pipePrefix}.{"heartbeat"}";
+        var heartBeatPipe = $"{pipePrefix}.heartbeat";
         if (heartBeatPipe.Length > maxPipeLength)
             throw new ArgumentOutOfRangeException($"send pipe {heartBeatPipe} too long, limit is {maxPipeLength}");
         var receivePipe = $"{pipePrefix}.{clientId}.receive";
@@ -107,13 +106,13 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to failed heartbeat")));
 
         //cancel request if client got disposed.
-        using var clientStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(_connectionsCancellation.Token);
+        using var clientStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(Cancellation.Token);
         clientStopCancellation.Token.Register(() =>
             requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to cancellation of client")));
 
         //once all cancellation token callbacks setup - verify if we are not already in cancelled state 
         //and if so - simply throw
-        if (_connectionsCancellation.IsCancellationRequested)
+        if (Cancellation.IsCancellationRequested)
             throw new TaskCanceledException("Request cancelled due to cancellation of client");
 
         var requestMessage = new PipeClientRequestMessage(Guid.NewGuid())
@@ -170,13 +169,13 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     private async Task SendRequest<TReq>(Guid id, PipeMessageRequest<TReq> request, PipeProtocol protocol, CancellationToken cancellation)
     {
         _logger.LogDebug("sending request message {MessageId} to server", id);
-        var header = new PipeAsyncMessageHeader { MessageId = id, ReplyPipe = ReplyIn.PipeName };
+        var header = new PipeAsyncMessageHeader { MessageId = id, ReplyPipe = ReplyIn.Pipe };
         await protocol.BeginTransferMessageAsync(header, cancellation);
         await protocol.EndTransferMessage(id, Write, cancellation);
         _logger.LogDebug("sent request message {MessageId} to server", id);
 
-        Task Write(Stream stream, CancellationToken cancellation)
-            => _messageWriter.WriteRequest(request, stream, cancellation);
+        Task Write(Stream stream, CancellationToken c)
+            => _messageWriter.WriteRequest(request, stream, c);
     }
 
     private async Task<PipeMessageResponse<TRep>> ReadReply<TRep>(Guid id, PipeProtocol protocol, CancellationToken cancellation)
@@ -186,21 +185,21 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         _logger.LogDebug("received reply for message {MessageId} from server", id);
         return response;
 
-        ValueTask<PipeMessageResponse<TRep>> Read(Stream stream, CancellationToken cancellation)
-            => _messageWriter.ReadResponse<TRep>(stream, cancellation);
+        ValueTask<PipeMessageResponse<TRep>> Read(Stream stream, CancellationToken c)
+            => _messageWriter.ReadResponse<TRep>(stream, c);
 
     }
 
     public void Dispose()
     {
-        _connectionsCancellation.Cancel();
+        Cancellation.Cancel();
         _connectionsTasks.Wait();
         _logger.LogDebug("client has been disposed");
     }
 
     public async ValueTask DisposeAsync()
     {
-        _connectionsCancellation.Cancel();
+        Cancellation.Cancel();
         await _connectionsTasks;
         _logger.LogDebug("client has been disposed");        
     }

@@ -10,17 +10,15 @@ namespace RpcPipes.PipeHandlers;
 
 internal class PipeReplyOutHandler
 {
-    private static Meter _meter = new(nameof(PipeReplyOutHandler));
-    private static Counter<int> _replyMessagesCounter = _meter.CreateCounter<int>("reply-messages");
+    private readonly static Meter Meter = new(nameof(PipeReplyOutHandler));
+    private readonly static Counter<int> ReplyMessagesCounter = Meter.CreateCounter<int>("reply-messages");
     
-    private ILogger _logger;
-
-    private PipeMessageDispatcher _connectionPool;
-    private IPipeHeartbeatHandler _heartbeatHandler;
+    private readonly ILogger _logger;
+    private readonly IPipeHeartbeatHandler _heartbeatHandler;
 
     private readonly Channel<PipeServerRequestMessage> _responseChannel = Channel.CreateUnbounded<PipeServerRequestMessage>();
 
-    public Task ClientTask { get; private set;} = Task.CompletedTask;
+    public Task ClientTask { get; }
     
     public PipeReplyOutHandler(
         ILogger logger, 
@@ -28,12 +26,11 @@ internal class PipeReplyOutHandler
         IPipeHeartbeatHandler heartbeatHandler)
     {
         _logger = logger;
-        _connectionPool = connectionPool;
         _heartbeatHandler = heartbeatHandler;
         ClientTask = connectionPool.ProcessClientMessages(_responseChannel, GetTargetPipeName, InvokeSendResponse);
 
         string GetTargetPipeName(PipeServerRequestMessage requestMessage)
-            => requestMessage.PipeName;
+            => requestMessage.Pipe;
 
         Task InvokeSendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
             => SendResponse(requestMessage, protocol, cancellation);        
@@ -42,14 +39,14 @@ internal class PipeReplyOutHandler
     public ValueTask PublishResponseMessage(PipeServerRequestMessage requestMessage)
     {
         _logger.LogDebug("scheduling reply for message {MessageId}", requestMessage.Id);
-        _replyMessagesCounter.Add(1);
+        ReplyMessagesCounter.Add(1);
         return _responseChannel.Writer.WriteAsync(requestMessage);
     }
 
     private async Task SendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
         _logger.LogDebug("scheduled reply for message {MessageId}", requestMessage.Id);
-        _replyMessagesCounter.Add(-1);
+        ReplyMessagesCounter.Add(-1);
         try
         {
             await requestMessage.SendResponse.Invoke(protocol, cancellation);            

@@ -8,32 +8,32 @@ namespace RpcPipes.PipeHandlers;
 
 internal class PipeRequestInHandler
 {
-    private static Meter _meter = new(nameof(PipeRequestInHandler));
-    private static Counter<int> _pendingMessagesCounter = _meter.CreateCounter<int>("pending-messages");
-    private static Counter<int> _activeMessagesCounter = _meter.CreateCounter<int>("active-messages");
-    private static Counter<int> _handledMessagesCounter = _meter.CreateCounter<int>("handled-messages");
+    private readonly static Meter Meter = new(nameof(PipeRequestInHandler));
+    private readonly static Counter<int> PendingMessagesCounter = Meter.CreateCounter<int>("pending-messages");
+    private readonly static Counter<int> ActiveMessagesCounter = Meter.CreateCounter<int>("active-messages");
+    private readonly static Counter<int> HandledMessagesCounter = Meter.CreateCounter<int>("handled-messages");
 
-    private ILogger _logger;
-    private PipeMessageDispatcher _connectionPool;
-    private IPipeHeartbeatHandler _heartbeatHandler;
+    private readonly ILogger _logger;
+    private readonly PipeMessageDispatcher _connectionPool;
+    private readonly IPipeHeartbeatHandler _heartbeatHandler;
 
-    public string PipeName { get; }
+    public string Pipe { get; }
 
     public PipeRequestInHandler(
         ILogger logger,
-        string pipeName,
+        string pipe,
         PipeMessageDispatcher connectionPool,
         IPipeHeartbeatHandler heartbeatHandler)
     {
         _logger = logger;
         _connectionPool = connectionPool;
         _heartbeatHandler = heartbeatHandler;
-        PipeName = pipeName;
+        Pipe = pipe;
     }
 
     public Task Start(IPipeHeartbeatReporter heartbeatReporter, Func<PipeServerRequestMessage, bool> setupRequest)
     {
-        return _connectionPool.ProcessServerMessages(PipeName, ReceiveMessage);
+        return _connectionPool.ProcessServerMessages(Pipe, ReceiveMessage);
 
         Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
             => HandleReceiveMessage(heartbeatReporter, setupRequest, protocol, cancellation);
@@ -58,7 +58,7 @@ internal class PipeRequestInHandler
             if (await requestMessage.ReadRequest.Invoke(protocol, cancellation))
             {
                 _logger.LogDebug("scheduling request execution for message {MessageId}", requestMessage.Id);
-                _pendingMessagesCounter.Add(1);
+                PendingMessagesCounter.Add(1);
                 ThreadPool.QueueUserWorkItem(ExecuteRequest, requestMessage);
             }
         }
@@ -71,8 +71,8 @@ internal class PipeRequestInHandler
 
         async Task ExecuteAsync()
         {
-            _pendingMessagesCounter.Add(-1);
-            _activeMessagesCounter.Add(1);
+            PendingMessagesCounter.Add(-1);
+            ActiveMessagesCounter.Add(1);
             _heartbeatHandler.TryGetMessageCancellation(requestMessage.Id, out var requestCancellation);
             try
             {
@@ -80,7 +80,6 @@ internal class PipeRequestInHandler
             }
             catch (OperationCanceledException)
             {
-                return;
             }
             catch (Exception e)
             {
@@ -88,8 +87,8 @@ internal class PipeRequestInHandler
             }
             finally
             {
-                _handledMessagesCounter.Add(1);
-                _activeMessagesCounter.Add(-1);
+                HandledMessagesCounter.Add(1);
+                ActiveMessagesCounter.Add(-1);
             }
         }
     }

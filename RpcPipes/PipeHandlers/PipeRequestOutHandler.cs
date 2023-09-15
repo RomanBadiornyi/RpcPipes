@@ -9,27 +9,23 @@ namespace RpcPipes.PipeHandlers;
 
 internal class PipeRequestOutHandler    
 {
-    private static Meter _meter = new(nameof(PipeRequestOutHandler));
-    private static Counter<int> _sentMessagesCounter = _meter.CreateCounter<int>("sent-messages");
+    private readonly static Meter _meter = new(nameof(PipeRequestOutHandler));
+    private readonly static Counter<int> _sentMessagesCounter = _meter.CreateCounter<int>("sent-messages");
 
-    private ILogger _logger;
-    
-    private PipeMessageDispatcher _connectionPool;
-
+    private readonly ILogger _logger;    
     private readonly Channel<PipeClientRequestMessage> _requestChannel = Channel.CreateUnbounded<PipeClientRequestMessage>();
 
-    public string PipeName { get; }
-    public Task ClientTask { get; private set; } = Task.CompletedTask;
+    public string Pipe { get; }
+    public Task ClientTask { get; }
 
-    public PipeRequestOutHandler(ILogger logger, string pipeName, PipeMessageDispatcher connectionPool, Func<PipeClientRequestMessage, ValueTask> onMessageSend)
+    public PipeRequestOutHandler(ILogger logger, string pipe, PipeMessageDispatcher connectionPool, Func<PipeClientRequestMessage, ValueTask> onMessageSend)
     {
         _logger = logger;
-        _connectionPool = connectionPool;
-        PipeName = pipeName;
-        ClientTask = _connectionPool.ProcessClientMessages(_requestChannel, GetTargetPipeName, InvokeHandleSendMessage);
+        Pipe = pipe;
+        ClientTask = connectionPool.ProcessClientMessages(_requestChannel, GetTargetPipeName, InvokeHandleSendMessage);
 
         string GetTargetPipeName(PipeClientRequestMessage requestMessage)
-            => PipeName;
+            => Pipe;
 
         Task InvokeHandleSendMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
             => HandleSendMessage(onMessageSend, requestMessage, protocol, cancellation);

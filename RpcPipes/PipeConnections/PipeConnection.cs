@@ -3,25 +3,25 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeConnections;
 
-internal abstract class PipeConnection<T> : IPipeConnection<T>
+public abstract class PipeConnection<T> : IPipeConnection
     where T: PipeStream
 {
-    private ILogger _logger;
+    private readonly ILogger _logger;
 
-    protected T _connection;
-    protected volatile bool _connected;
-    protected volatile bool _inUse;    
+    protected T Connection;
+    protected volatile bool Connected;
+    protected volatile bool Used;    
 
     public int Id { get; }
     public string Name { get; }
 
-    public bool InUse => _inUse;
+    public bool InUse => Used;
 
     public DateTime LastUsedAt { get; private set; }
     public TimeSpan ConnectionRetryTimeout { get; }
     public TimeSpan ConnectionExpiryTime { get; }
 
-    public PipeConnection(ILogger logger, int id, string name, TimeSpan connectionRetryTime, TimeSpan connectionExpiryTime)
+    protected PipeConnection(ILogger logger, int id, string name, TimeSpan connectionRetryTime, TimeSpan connectionExpiryTime)
     {
         _logger = logger;
         Id = id;
@@ -37,34 +37,33 @@ internal abstract class PipeConnection<T> : IPipeConnection<T>
         static bool VerifyIfDispatched(bool ok, bool shouldUse)
             => ok || !shouldUse;
 
-        bool ok = false;
-        bool shouldUse = true;
-        Exception error;
+        var ok = false;
+        var shouldUse = true;
 
         try
         {
-            _inUse = true;
+            Used = true;
             shouldUse = usePredicateFunc == null || usePredicateFunc.Invoke(this);
             LastUsedAt = DateTime.UtcNow;
 
-            (ok, error) = await TryConnect(cancellation);            
+            (ok, var error) = await TryConnect(cancellation);            
             if  (ok && shouldUse)
             {
                 LastUsedAt = DateTime.UtcNow;
-                await useFunc.Invoke(_connection);
+                await useFunc.Invoke(Connection);
                 LastUsedAt = DateTime.UtcNow;
-                return (VerifyIfConnected(), VerifyIfDispatched(ok, shouldUse), error);
+                return (VerifyIfConnected(), VerifyIfDispatched(true, true), error);
             }
             if (!shouldUse)
             {
-                return (VerifyIfConnected(), VerifyIfDispatched(ok, shouldUse), error);
+                return (VerifyIfConnected(), VerifyIfDispatched(ok, false), error);
             }
-            if (!ok && shouldUse && error is not OperationCanceledException)
+            if (error is not OperationCanceledException)
             {
                 _logger.LogWarning("apply {Delay} due to unhandled connection error '{Error}'", ConnectionRetryTimeout, error.Message);
-                await Task.Delay(ConnectionRetryTimeout);
+                await Task.Delay(ConnectionRetryTimeout, cancellation);
             }
-            return (VerifyIfConnected(), VerifyIfDispatched(ok, shouldUse), error);
+            return (VerifyIfConnected(), VerifyIfDispatched(false, true), error);
         }
         catch (Exception ex)
         {         
@@ -74,12 +73,12 @@ internal abstract class PipeConnection<T> : IPipeConnection<T>
         }
         finally
         {
-            _inUse = false;
+            Used = false;
         }
     }
 
     public bool VerifyIfConnected()
-        => _connected && _connection != null && _connection.IsConnected;
+        => Connected && Connection is { IsConnected: true };
     public bool VerifyIfExpired(DateTime currentTime)
         => LastUsedAt + ConnectionExpiryTime < currentTime;
 

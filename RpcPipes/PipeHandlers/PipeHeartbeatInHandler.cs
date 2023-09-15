@@ -7,28 +7,28 @@ namespace RpcPipes.PipeHandlers;
 
 internal class PipeHeartbeatInHandler
 {
-    private ILogger _logger;
-    private PipeMessageDispatcher _connectionPool;
-    private IPipeMessageWriter _messageWriter;
+    private readonly ILogger _logger;
+    private readonly PipeMessageDispatcher _connectionPool;
+    private readonly IPipeMessageWriter _messageWriter;
 
-    public string PipeName { get; }
+    public string Pipe { get; }
 
     public PipeHeartbeatInHandler(
         ILogger logger,
-        string pipeName,
+        string pipe,
         PipeMessageDispatcher connectionPool,
         IPipeMessageWriter messageWriter)
     {
         _logger = logger;
         _connectionPool = connectionPool;
         _messageWriter = messageWriter;
-        PipeName = pipeName;
+        Pipe = pipe;
     }
 
     public Task Start<TP>(IPipeHeartbeatHandler<TP> heartbeatHandler)
         where TP: IPipeHeartbeat
     {
-        return _connectionPool.ProcessServerMessages(PipeName, HeartbeatMessage);
+        return _connectionPool.ProcessServerMessages(Pipe, HeartbeatMessage);
 
         Task HeartbeatMessage(PipeProtocol protocol, CancellationToken cancellation)
             => HandleHeartbeatMessage(heartbeatHandler, protocol, cancellation);
@@ -37,7 +37,7 @@ internal class PipeHeartbeatInHandler
     private async Task HandleHeartbeatMessage<TP>(IPipeHeartbeatHandler<TP> heartbeatHandler, PipeProtocol protocol, CancellationToken cancellation)
         where TP: IPipeHeartbeat
     {
-        var pipeHeartbeat = default(TP);
+        TP pipeHeartbeat;
         var (pipeHeartbeatRequest, _) = await protocol.ReceiveMessage(ReadHeartbeat, cancellation);
         if (pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
         {
@@ -66,10 +66,10 @@ internal class PipeHeartbeatInHandler
             await protocol.TransferMessage(heartbeatHeader, WriteHeartbeat, cancellation);
         }
 
-        ValueTask<PipeRequestHeartbeat> ReadHeartbeat(Stream stream, CancellationToken cancellation)
-            => _messageWriter.ReadData<PipeRequestHeartbeat>(stream, cancellation);
+        ValueTask<PipeRequestHeartbeat> ReadHeartbeat(Stream stream, CancellationToken c)
+            => _messageWriter.ReadData<PipeRequestHeartbeat>(stream, c);
 
-        Task WriteHeartbeat(Stream stream, CancellationToken cancellation)
-            => _messageWriter.WriteData(pipeHeartbeat, stream, cancellation);
+        Task WriteHeartbeat(Stream stream, CancellationToken c)
+            => _messageWriter.WriteData(pipeHeartbeat, stream, c);
     }
 }

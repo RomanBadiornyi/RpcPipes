@@ -13,52 +13,54 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
     public async Task RequestReply_WhenServerDeserializeThrows_ErrorReturned()
     {        
         var serializer = Substitute.ForPartsOf<PipeSerializer>();        
-        serializer.ReadRequest<RequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
-            .Returns<PipeMessageRequest<RequestMessage>>(args => throw new InvalidOperationException("deserialize server error"));
+        serializer.ReadRequest<PipeRequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns<PipeMessageRequest<PipeRequestMessage>>(_ => throw new InvalidOperationException("deserialize server error"));
         
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, serializer);
-        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
+        var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, serializer);
+        ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, _serializer))
+        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+            ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
-            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
-            var request = new RequestMessage("hello world", 0);
+            pipeClient.Cancellation.CancelAfter(ClientRequestTimeout);
+            var request = new PipeRequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeServerException>(
-                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
+                () => pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
+            Assert.That(exception, Is.Not.Null);
             Assert.That(exception.Message, Does.Contain("deserialize server error"));
         }
 
-        _serverStop.Cancel();
-        await _serverTask;
+        ServerStop.Cancel();
+        await ServerTask;
     }
 
     [Test]
     public async Task RequestReply_WhenClientDeserializeThrows_ErrorReturned()
     {        
         var serializer = Substitute.ForPartsOf<PipeSerializer>();        
-        serializer.ReadResponse<ReplyMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
-            .Returns<PipeMessageResponse<ReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
+        serializer.ReadResponse<PipeReplyMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns<PipeMessageResponse<PipeReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
-        var pipeServer = new PipeTransportServer(_serverLogger, "rpc.pipe", 1, _serializer);
-        _serverTask = pipeServer.Start(_messageHandler, _heartbeatHandler, _serverStop.Token);
+        var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
+        ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<HeartbeatMessage>(
-            _clientLogger, "rpc.pipe", clientId, 1, _heartbeatMessageReceiver, serializer))
+        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+            ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, serializer))
         {
-            pipeClient.Cancellation.CancelAfter(_clientRequestTimeout);
-            var request = new RequestMessage("hello world", 0);
+            pipeClient.Cancellation.CancelAfter(ClientRequestTimeout);
+            var request = new PipeRequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeDataException>(
-                () => pipeClient.SendRequest<RequestMessage, ReplyMessage>(request, requestContext, CancellationToken.None));
+                () => pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
+            Assert.That(exception, Is.Not.Null);
             Assert.That(exception.InnerException, Is.TypeOf<InvalidOperationException>());
             Assert.That(exception.Message, Does.Contain("deserialize client error"));
         }
 
-        _serverStop.Cancel();
-        await _serverTask;
+        ServerStop.Cancel();
+        await ServerTask;
     }  
 }

@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.IO.Pipes;
 using RpcPipes.PipeData;
 using RpcPipes.PipeExceptions;
 
@@ -10,8 +9,6 @@ public class PipeProtocol
     private readonly Stream _stream;
     private readonly int _headerBuffer;
     private readonly int _contentBuffer;
-
-    public bool Connected => CheckConnection(_stream);
 
     public PipeProtocol(Stream stream, int headerBuffer, int contentBuffer)
     {
@@ -218,14 +215,5 @@ public class PipeProtocol
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-    }
-
-    private static bool CheckConnection(Stream stream)
-    {
-        if (stream is NamedPipeClientStream { IsConnected: true } client)
-            return client.IsConnected;
-        if (stream is NamedPipeClientStream { IsConnected: true }  server)
-            return server.IsConnected;
-        return false;
     }
 }
