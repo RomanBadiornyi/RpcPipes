@@ -10,8 +10,6 @@ public class PipeConnectionGroup<T> where T: IPipeConnection
     public ConcurrentStack<T> FreeConnections { get; }
     public ConcurrentQueue<T> DisabledConnections { get; }
 
-    public int IncorrectConnectionsDetected;
-
     public PipeConnectionGroup(string name, int instances, Func<int, string, T> connectionFunc)
     {
         Name = name;
