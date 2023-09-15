@@ -67,8 +67,9 @@ internal abstract class PipeConnection<T> : IPipeConnection<T>
             return (VerifyIfConnected(), VerifyIfDispatched(ok, shouldUse), error);
         }
         catch (Exception ex)
-        {            
-            Disconnect($"error: {ex.Message}");
+        {         
+            var reason = ex is OperationCanceledException ? "cancelled" : $"error: {ex.Message}";
+            Disconnect(reason);
             return (VerifyIfConnected(), VerifyIfDispatched(ok, shouldUse), ex);
         }
         finally

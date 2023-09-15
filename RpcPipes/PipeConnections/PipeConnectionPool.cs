@@ -57,7 +57,9 @@ public partial class PipeConnectionPool : IAsyncDisposable
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseClientConnection(
         string pipeName, Func<IPipeConnection, bool> connectionActivityPredicateFunc, Func<NamedPipeClientStream, Task> connectionActivityFunc)
     {
-        var (connection, connectionPool) = await GetOrCreateConnection(pipeName, _connectionsClient, CreateNewConnectionPool);
+        var (connection, connectionPool, error) = await GetOrCreateConnection(pipeName, _connectionsClient, CreateNewConnectionPool);
+        if (error != null)
+            return (false, false, error);        
         var useResult = await connection.UseConnection(connectionActivityFunc, connectionActivityPredicateFunc, _cancellation);
         PutOrReleaseConnection(_connectionsClient, connectionPool, connection, useResult);
         return useResult;
@@ -72,7 +74,9 @@ public partial class PipeConnectionPool : IAsyncDisposable
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseServerConnection(
         string pipeName, Func<IPipeConnection, bool> connectionActivityPredicateFunc, Func<NamedPipeServerStream, Task> connectionActivityFunc)
     {
-        var (connection, connectionPool) = await GetOrCreateConnection(pipeName, _connectionsServer, CreateNewConnectionPool);
+        var (connection, connectionPool, error) = await GetOrCreateConnection(pipeName, _connectionsServer, CreateNewConnectionPool);
+        if (error != null)
+            return (false, false, error);
         var useResult = await connection.UseConnection(connectionActivityFunc, connectionActivityPredicateFunc, _cancellation);
         PutOrReleaseConnection(_connectionsServer, connectionPool, connection, useResult);
         return useResult;
@@ -107,7 +111,7 @@ public partial class PipeConnectionPool : IAsyncDisposable
         }
     }
 
-    private async ValueTask<(T Connection, PipeConnectionGroup<T> ConnectionPool)> GetOrCreateConnection<T>(
+    private async ValueTask<(T Connection, PipeConnectionGroup<T> ConnectionPool, Exception Error)> GetOrCreateConnection<T>(
         string pipeName,
         ConcurrentDictionary<string, PipeConnectionGroup<T>> connections,
         Func<string, PipeConnectionGroup<T>> poolCreateFunc)
@@ -130,9 +134,8 @@ public partial class PipeConnectionPool : IAsyncDisposable
             tries++;
         }
         if (connection == null)
-            throw new IndexOutOfRangeException($"Run out of available connections on the pool {connectionPool.Name}");
-        connectionPool.BusyConnections.TryAdd(connection.Id, connection);
-        return (connection, connectionPool);
+            return (null, null, new IndexOutOfRangeException($"Run out of available connections on the pool {connectionPool.Name}"));
+        return (connection, connectionPool, null);
     }
 
     private void PutOrReleaseConnection<T>(
@@ -169,7 +172,6 @@ public partial class PipeConnectionPool : IAsyncDisposable
             connectionPool.DisabledConnections.Enqueue(connection);
             connection.Disconnect("outdated pool");
         }
-        connectionPool.BusyConnections.TryRemove(connection.Id, out _);
     }
 
     private void ReleaseConnections<T>(
@@ -203,32 +205,12 @@ public partial class PipeConnectionPool : IAsyncDisposable
 
             //lock connections counts for cleanup checks
             var free = connectionPool.FreeConnections.Count;
-            var busy = connectionPool.BusyConnections.Count;
             var disabled = connectionPool.DisabledConnections.Count;
-
-
             if (free == 0 && disabled == connectionPool.Instances)
             {
                 connections.TryRemove(connectionPool.Name, out _);
                 _logger.LogInformation("connection pool {PoolName} cleaned up '{Reason}'", connectionPool.Name, reason);
-            }
-            //bellow is a bit fearful logic which attempts to indicate case when we might loose track of some connections due to unpredicted error
-            //in such case we will remove this pool from tracking so that new one will be created on next connection request
-            var instancesCurrent = free + busy + disabled;
-            //since we don't have locks, for short period of time it is possible that bellow condition will be false
-            //that is why we detect it as a problem only if it happens 10 times in a row - that is something very unlikely to happen, 
-            //so put warning log for tracking
-            if (instancesCurrent != connectionPool.Instances)
-                Interlocked.Increment(ref connectionPool.IncorrectConnectionsDetected);
-            else
-                connectionPool.IncorrectConnectionsDetected = 0;
-
-            if (connectionPool.IncorrectConnectionsDetected > 10)
-            {
-                connections.TryRemove(connectionPool.Name, out _);
-                _logger.LogWarning("connection pool {PoolName} has wrong connections {Connections} when expected {Instances}",
-                    connectionPool.Name, instancesCurrent, Instances);
-            }
+            }            
         }
     }
 

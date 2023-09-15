@@ -55,7 +55,7 @@ public class PipeMessageDispatcher
         while (!_cancellation.IsCancellationRequested)
         {
             var (connected, dispatched, error) = await _connectionPool.UseServerConnection(pipeName, ShouldDispatchMessage, DispatchMessage);
-            if (error != null && !IsConnectionCancelled(error) && !IsConnectionInterrupted(error, connected))
+            if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
                 _logger.LogError(error, "error occurred while waiting for message on pipe stream {PipeName}, dispatched '{Dispatched}'", pipeName, dispatched);
         }
 
@@ -91,7 +91,7 @@ public class PipeMessageDispatcher
             if (!dispatched)
                 messagesQueue.Writer.TryWrite(item);
             //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
-            if (error != null && !IsConnectionCancelled(error) && !IsConnectionInterrupted(error, connected))
+            if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
                 _logger.LogError(error, "error occurred while processing message {MessageId} on pipe stream {PipeName}, dispatched '{Dispatched}'", item.Id, pipeName, dispatched);
 
             bool ShouldDispatchMessage(IPipeConnection connection)
@@ -111,6 +111,8 @@ public class PipeMessageDispatcher
         }
     }
 
-    private bool IsConnectionCancelled(Exception e) => e is OperationCanceledException;
-    private bool IsConnectionInterrupted(Exception e, bool connected) => e is PipeNetworkException && !connected;
+    private bool IsConnectionCancelled(Exception e, bool dispatched) => 
+        (e is OperationCanceledException || e is TimeoutException) && !dispatched;
+    private bool IsConnectionInterrupted(Exception e, bool connected) => 
+        (e is PipeNetworkException || e is OperationCanceledException || e is TimeoutException) && !connected;
 }
