@@ -67,7 +67,7 @@ public class PipeConnectionPool : IAsyncDisposable
             => new(name, Instances, CreateNewConnection);
 
         PipeClientConnection CreateNewConnection(int id, string name)
-            => new(_logger, _meter, id, name, ConnectionTimeout, ConnectionRetryTimeout, ConnectionExpiryTimeout);
+            => new(_logger, _meter, id, name, ConnectionTimeout, ConnectionExpiryTimeout);
     }
 
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseServerConnection(
@@ -86,7 +86,7 @@ public class PipeConnectionPool : IAsyncDisposable
             => new(name, Instances, CreateNewConnection);
 
         PipeServerConnection CreateNewConnection(int id, string name)
-            => new(_logger, _meter, id, name, Instances, Buffer, ConnectionRetryTimeout, ConnectionExpiryTimeout);
+            => new(_logger, _meter, id, name, Instances, Buffer, ConnectionExpiryTimeout);
     }
 
     public void Cleanup()

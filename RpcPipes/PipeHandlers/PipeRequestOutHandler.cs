@@ -7,72 +7,73 @@ using RpcPipes.PipeTransport;
 
 namespace RpcPipes.PipeHandlers;
 
-internal class PipeRequestOutHandler    
+internal class PipeRequestOutHandler : IPipeMessageSender<PipeClientRequestMessage>
 {
     private readonly static Meter _meter = new(nameof(PipeRequestOutHandler));
     private readonly static Counter<int> _sentMessagesCounter = _meter.CreateCounter<int>("sent-messages");
 
-    private readonly ILogger _logger;    
-    private readonly Channel<PipeClientRequestMessage> _requestChannel = Channel.CreateUnbounded<PipeClientRequestMessage>();
+    private readonly ILogger _logger;
+    private readonly string _pipe;
+    private readonly PipeRequestHandler _requestHandler;
+    private readonly Channel<PipeClientRequestMessage> _requestChannel;
 
-    public string Pipe { get; }
     public Task ClientTask { get; }
 
-    public PipeRequestOutHandler(ILogger logger, string pipe, PipeMessageDispatcher connectionPool, Func<PipeClientRequestMessage, ValueTask> onMessageSend)
+    public PipeRequestOutHandler(
+        ILogger logger,
+        string pipe,
+        PipeMessageDispatcher connectionPool,
+        PipeRequestHandler requestHandler)
     {
         _logger = logger;
-        Pipe = pipe;
-        ClientTask = connectionPool.ProcessClientMessages(_requestChannel, GetTargetPipeName, InvokeHandleSendMessage);
-
-        string GetTargetPipeName(PipeClientRequestMessage requestMessage)
-            => Pipe;
-
-        Task InvokeHandleSendMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
-            => HandleSendMessage(onMessageSend, requestMessage, protocol, cancellation);
+        _pipe = pipe;
+        _requestHandler = requestHandler;
+        _requestChannel =  Channel.CreateUnbounded<PipeClientRequestMessage>();
+        ClientTask = connectionPool.ProcessClientMessages(_requestChannel, this);
     }
 
-    public ValueTask PublishRequestMessage(PipeClientRequestMessage requestMessage)
-        => _requestChannel.Writer.WriteAsync(requestMessage);
-
-    private async Task HandleSendMessage(Func<PipeClientRequestMessage, ValueTask> onMessageSend, PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
+    public async ValueTask Publish(PipeClientRequestMessage message)
     {
-        try
+        await _requestChannel.Writer.WriteAsync(message);
+    }
+
+    public string TargetPipe(PipeClientRequestMessage message)
+        => _pipe;
+
+    public async Task HandleMessage(PipeClientRequestMessage message, PipeProtocol protocol, CancellationToken cancellation)
+    {
+        message.RequestCancellation.ThrowIfCancellationRequested();
+        //if we get to this point and request not cancelled we send message to server without interruption by passing global cancellation.
+        await message.SendAction.Invoke(protocol, cancellation);
+        _sentMessagesCounter.Add(1);
+        await _requestHandler.RequestMessageSent(message);
+        _logger.LogDebug("sent message {MessageId} for execution", message.Id);
+    }
+
+    public async ValueTask HandleError(PipeClientRequestMessage message, Exception error)
+    {
+        if (error is PipeDataException)
         {
-            requestMessage.RequestCancellation.ThrowIfCancellationRequested();            
-            //if we get to this point and request not cancelled we send message to server without interruption by passing global cancellation.
-            await requestMessage.SendAction.Invoke(protocol, cancellation);
-            _sentMessagesCounter.Add(1);
-            await onMessageSend.Invoke(requestMessage);
-            _logger.LogDebug("sent message {MessageId} for execution", requestMessage.Id);
+            message.RequestTask.TrySetException(error);
         }
-        catch (OperationCanceledException e)
+        else
         {
-            requestMessage.RequestTask.TrySetException(e);
-            return;
-        }
-        catch (PipeDataException e)
-        {
-            requestMessage.RequestTask.TrySetException(e);
-            return;
-        }
-        catch (Exception e)
-        {
-            await HandleSendMessageError(requestMessage, e);
+            await HandleSendMessageError(message, error);
         }
     }
 
-    private async Task HandleSendMessageError(PipeClientRequestMessage requestMessage, Exception e)
+    private async ValueTask HandleSendMessageError(PipeClientRequestMessage requestMessage, Exception e)
     {
         requestMessage.Retries++;
         if (requestMessage.Retries < 3)
         {
             //push message back to the channel so we will attempt to retry sending it
-            await PublishRequestMessage(requestMessage);
+            await Publish(requestMessage);
         }
         else
         {
             requestMessage.RequestTask.TrySetException(e);
             _logger.LogError(e, "unable to send message {MessageId} due to error", requestMessage.Id);
         }
-    }
+    }    
 }

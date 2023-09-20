@@ -8,18 +8,17 @@ using RpcPipes.PipeTransport;
 
 namespace RpcPipes.PipeHandlers;
 
-internal class PipeReplyOutHandler
+internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage>
 {
     private readonly static Meter Meter = new(nameof(PipeReplyOutHandler));
     private readonly static Counter<int> ReplyMessagesCounter = Meter.CreateCounter<int>("reply-messages");
     
     private readonly ILogger _logger;
     private readonly IPipeHeartbeatHandler _heartbeatHandler;
-
-    private readonly Channel<PipeServerRequestMessage> _responseChannel = Channel.CreateUnbounded<PipeServerRequestMessage>();
+    private readonly Channel<PipeServerRequestMessage> _responseChannel;
 
     public Task ClientTask { get; }
-    
+
     public PipeReplyOutHandler(
         ILogger logger, 
         PipeMessageDispatcher connectionPool,
@@ -27,47 +26,38 @@ internal class PipeReplyOutHandler
     {
         _logger = logger;
         _heartbeatHandler = heartbeatHandler;
-        ClientTask = connectionPool.ProcessClientMessages(_responseChannel, GetTargetPipeName, InvokeSendResponse);
-
-        string GetTargetPipeName(PipeServerRequestMessage requestMessage)
-            => requestMessage.Pipe;
-
-        Task InvokeSendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
-            => SendResponse(requestMessage, protocol, cancellation);        
+        _responseChannel = Channel.CreateUnbounded<PipeServerRequestMessage>();
+        ClientTask = connectionPool.ProcessClientMessages(_responseChannel, this);
     }
 
-    public ValueTask PublishResponseMessage(PipeServerRequestMessage requestMessage)
+    public async ValueTask Publish(PipeServerRequestMessage message)
     {
-        _logger.LogDebug("scheduling reply for message {MessageId}", requestMessage.Id);
+        _logger.LogDebug("scheduling reply for message {MessageId}", message.Id);
         ReplyMessagesCounter.Add(1);
-        return _responseChannel.Writer.WriteAsync(requestMessage);
+        await _responseChannel.Writer.WriteAsync(message);
     }
 
-    private async Task SendResponse(PipeServerRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
+    public string TargetPipe(PipeServerRequestMessage message)
+        => message.Pipe;
+
+    public async Task HandleMessage(PipeServerRequestMessage message, PipeProtocol protocol, CancellationToken cancellation)
     {
-        _logger.LogDebug("scheduled reply for message {MessageId}", requestMessage.Id);
+        _logger.LogDebug("scheduled reply for message {MessageId}", message.Id);
         ReplyMessagesCounter.Add(-1);
-        try
-        {
-            await requestMessage.SendResponse.Invoke(protocol, cancellation);            
-            _heartbeatHandler.EndMessageHandling(requestMessage.Id);
-            requestMessage.OnMessageCompleted.Invoke(null, true);
-        }
-        catch (OperationCanceledException)
-        {            
-        }
-        catch (PipeDataException e)
-        {
-            ReportErrorOrComplete(requestMessage, e);            
-        }
-        catch (Exception e)
-        {
-            RetryOrComplete(requestMessage, e);
-            throw;
-        }
+        await message.SendResponse.Invoke(protocol, cancellation);            
+        _heartbeatHandler.EndMessageHandling(message.Id);
+        message.OnMessageCompleted.Invoke(null, true);        
     }
 
-    private void RetryOrComplete(PipeServerRequestMessage requestMessage, Exception e)
+    public async ValueTask HandleError(PipeServerRequestMessage message, Exception error)
+    {
+        if (error is PipeDataException)
+            await ReportErrorOrCompleteAsync(message, error);            
+        else 
+            await RetryOrComplete(message, error);
+    }        
+
+    private async ValueTask RetryOrComplete(PipeServerRequestMessage requestMessage, Exception e)
     {
         requestMessage.Retries += 1;
         if (requestMessage.Retries >= 3)
@@ -80,19 +70,18 @@ internal class PipeReplyOutHandler
         else
         {
             //publish to retry
-            PublishResponseMessage(requestMessage);
+            await Publish(requestMessage);
         }
     }
 
-    private void ReportErrorOrComplete(PipeServerRequestMessage requestMessage, Exception e)
+    private async Task ReportErrorOrCompleteAsync(PipeServerRequestMessage requestMessage, Exception e)
     {
         requestMessage.Retries += 1;
-        if (requestMessage.Retries >= 3 || !requestMessage.ReportError(e))
+        if (requestMessage.Retries >= 3 || !await requestMessage.ReportError(e))
         {
             //this means that we were not able to send error back to client, in this case simply drop message
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
             requestMessage.OnMessageCompleted.Invoke(e, false);
         }
-    }
-
+    }    
 }

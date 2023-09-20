@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using RpcPipes.PipeConnections;
 using RpcPipes.PipeExceptions;
+using RpcPipes.PipeHandlers;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
 
@@ -30,32 +31,32 @@ public class PipeMessageDispatcher
         BufferSize = bufferSize;
     }
 
-    public Task ProcessServerMessages(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
+    public Task ProcessServerMessages(IPipeMessageReceiver messageReceiver)
     {
         var pipeTasks = Enumerable
             .Range(0, Instances)
-            .Select(_ => RunServerMessageLoop(pipeName, action))
+            .Select(_ => RunServerMessageLoop(messageReceiver))
             .ToArray();
         return Task.WhenAll(pipeTasks);
     }
 
-    public Task ProcessClientMessages<T>(Channel<T> messagesQueue, Func<T, string> pipeTarget, Func<T, PipeProtocol, CancellationToken, Task> action)
+    public Task ProcessClientMessages<T>(Channel<T> messagesQueue, IPipeMessageSender<T> messageSender)
         where T : IPipeMessage
     {
         var pipeTasks = Enumerable
             .Range(0, Instances)
-            .Select(_ => RunClientMessageLoop(messagesQueue, pipeTarget, action))
+            .Select(_ => RunClientMessageLoop(messagesQueue, messageSender))
             .ToArray();
         return Task.WhenAll(pipeTasks);
     }
 
-    private async Task RunServerMessageLoop(string pipeName, Func<PipeProtocol, CancellationToken, Task> action)
+    private async Task RunServerMessageLoop(IPipeMessageReceiver messageReceiver)
     {
         while (!_cancellation.IsCancellationRequested)
         {
-            var (connected, dispatched, error) = await _connectionPool.UseServerConnection(pipeName, ShouldDispatchMessage, DispatchMessage);
+            var (connected, dispatched, error) = await _connectionPool.UseServerConnection(messageReceiver.Pipe, ShouldDispatchMessage, DispatchMessage);
             if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
-                _logger.LogError(error, "error occurred while waiting for message on pipe stream {PipeName}, dispatched '{Dispatched}'", pipeName, dispatched);
+                _logger.LogError(error, "error occurred while waiting for message on pipe stream {PipeName}, dispatched '{Dispatched}'", messageReceiver.Pipe, dispatched);
         }
 
         bool ShouldDispatchMessage(IPipeConnection connection)
@@ -66,11 +67,11 @@ public class PipeMessageDispatcher
         async Task DispatchMessage(NamedPipeServerStream stream)
         {
             var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
-            await action.Invoke(protocol, _cancellation);
+            await messageReceiver.ReceiveMessage(protocol, _cancellation);
         }
     }
 
-    private async Task RunClientMessageLoop<T>(Channel<T> messagesQueue, Func<T, string> pipeTarget, Func<T, PipeProtocol, CancellationToken, Task> action)
+    private async Task RunClientMessageLoop<T>(Channel<T> messagesQueue, IPipeMessageSender<T> messageSender)
         where T: IPipeMessage
     {
         while (!_cancellation.IsCancellationRequested)
@@ -83,12 +84,12 @@ public class PipeMessageDispatcher
             //we push message back into messagesQueue allowing other dispatchers to read same message and then we will bypass dispatching of this item
             //in this case at some point message will be picked by connection which is ready to serve this message and will eventually dispatch it
             var item = await messagesQueue.Reader.ReadAsync(_cancellation);
-            var pipeName = pipeTarget.Invoke(item);
+            var pipeName = messageSender.TargetPipe(item);
 
             var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);
-            //if message was not dispatched - return it back to channel for retry
-            if (!dispatched)
-                messagesQueue.Writer.TryWrite(item);
+            //if message was not dispatched - report error to handler and let it handle that
+            if (!dispatched && error != null)
+                await messageSender.HandleError(item, error);
             //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
             if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
                 _logger.LogError(error, "error occurred while processing message {MessageId} on pipe stream {PipeName}, dispatched '{Dispatched}'", item.Id, pipeName, dispatched);
@@ -105,7 +106,7 @@ public class PipeMessageDispatcher
             async Task DispatchMessage(NamedPipeClientStream stream)
             {
                 var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
-                    await action.Invoke(item, protocol, _cancellation);
+                    await messageSender.HandleMessage(item, protocol, _cancellation);
             }
         }
     }

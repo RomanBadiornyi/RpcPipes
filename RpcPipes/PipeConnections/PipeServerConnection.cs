@@ -15,8 +15,8 @@ internal class PipeServerConnection : PipeConnection<NamedPipeServerStream>
     public PipeDirection Direction => PipeDirection.InOut;
     public PipeTransmissionMode Transmission => PipeTransmissionMode.Byte;
 
-    public PipeServerConnection(ILogger logger, Meter meter, int id, string name, int instances, int buffer, TimeSpan connectionRetryTimeout, TimeSpan connectionExpiryTime)
-        : base(logger, id, name, connectionRetryTimeout, connectionExpiryTime)
+    public PipeServerConnection(ILogger logger, Meter meter, int id, string name, int instances, int buffer, TimeSpan connectionExpiryTime)
+        : base(id, name, connectionExpiryTime)
     {
         _logger = logger;
         _instances = instances;

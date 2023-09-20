@@ -32,7 +32,10 @@ internal class PipeConnectionGroup<T> where T: IPipeConnection
     public bool BorrowConnection(out T connection)
     {
         if (!FreeConnections.TryPop(out connection))
-            return DisabledConnections.TryDequeue(out connection);
+        {
+            if (!DisabledConnections.TryDequeue(out connection))
+                return false;
+        }
         return true;
     }
 

@@ -5,36 +5,34 @@ using RpcPipes.PipeTransport;
 
 namespace RpcPipes.PipeHandlers;
 
-internal class PipeReplyInHandler
+internal class PipeReplyInHandler : IPipeMessageReceiver
 {
     private static readonly Meter Meter = new(nameof(PipeReplyInHandler));
     private static readonly Counter<int> ReceivedMessagesCounter = Meter.CreateCounter<int>("received-messages");
     
     private readonly ILogger _logger;
-    private readonly PipeMessageDispatcher _connectionPool;
+    private readonly PipeRequestHandler _requestHandler;
 
     public string Pipe { get; }
+    public Task ServerTask { get; }
 
-    public PipeReplyInHandler(ILogger logger, string pipe, PipeMessageDispatcher connectionPool)
+    public PipeReplyInHandler(
+        ILogger logger, 
+        string pipe, 
+        PipeMessageDispatcher connectionPool, 
+        PipeRequestHandler requestHandler)
     {
         _logger = logger;
-        _connectionPool = connectionPool;
+        _requestHandler = requestHandler;
         Pipe = pipe;
+        ServerTask = connectionPool.ProcessServerMessages(this);
     }
 
-    public Task Start(Func<Guid, PipeClientRequestMessage> requestProvider)
-    {
-        return _connectionPool.ProcessServerMessages(Pipe, InvokeReceiveMessage);
-
-        Task InvokeReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
-            => HandleReceiveMessage(requestProvider, protocol, cancellation);
-    }
-
-    private async Task HandleReceiveMessage(Func<Guid, PipeClientRequestMessage> requestProvider, PipeProtocol protocol, CancellationToken cancellation)
+    public async Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
         PipeClientRequestMessage requestMessage = null;
         var header = await protocol
-            .BeginReceiveMessage(id => { requestMessage = TryMarkMessageAsCompleted(id, requestProvider); }, cancellation);
+            .BeginReceiveMessage(id => { requestMessage = TryMarkMessageAsCompleted(id, _requestHandler); }, cancellation);
         if (header != null && requestMessage != null)
         {
             await requestMessage.HeartbeatCheckHandle.WaitAsync(cancellation);
@@ -49,10 +47,10 @@ internal class PipeReplyInHandler
         }
     }
 
-    private PipeClientRequestMessage TryMarkMessageAsCompleted(Guid id, Func<Guid, PipeClientRequestMessage> requestProvider)
+    private PipeClientRequestMessage TryMarkMessageAsCompleted(Guid id, PipeRequestHandler requestHandler)
     {
         //ensure we stop heartbeat task as soon as we started receiving reply
-        var requestMessage = requestProvider.Invoke(id);
+        var requestMessage = requestHandler.GetRequestMessageById(id);
         if (requestMessage != null)
         {
             requestMessage.RequestCompleted = true;
@@ -85,5 +83,5 @@ internal class PipeReplyInHandler
             ReceivedMessagesCounter.Add(1);
             _logger.LogDebug("completed processing of reply message {MessageId}", requestMessage.Id);                
         }
-    }
+    }    
 }

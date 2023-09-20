@@ -75,15 +75,14 @@ public class PipeTransportServer
             ConnectionPool = new PipeConnectionPool(_logger, Meter, _instances, contentBuffer, _connectionsCancellation.Token);
             MessageDispatcher = new PipeMessageDispatcher(_logger, ConnectionPool, _instances, headerBuffer, contentBuffer, _connectionsCancellation.Token);
 
-            HeartbeatIn = new PipeHeartbeatInHandler(_logger, _heartbeatPipe, MessageDispatcher, _messageWriter);
-            RequestIn = new PipeRequestInHandler(_logger, _receivePipe, MessageDispatcher, heartbeatHandler);
+            var heartbeatReporter = messageHandler as IPipeHeartbeatReporter;
+            HeartbeatIn = new PipeHeartbeatInHandler<TP>(_logger, _heartbeatPipe, MessageDispatcher, heartbeatHandler, _messageWriter);
+            RequestIn = new PipeRequestInHandler(_logger, _receivePipe, MessageDispatcher, heartbeatHandler, heartbeatReporter, SetupRequestCallbacks);
             ReplyOut = new PipeReplyOutHandler(_logger, MessageDispatcher, heartbeatHandler);
 
             _connectionsTask = Task
-                .WhenAll(
-                    RequestIn.Start(messageHandler as IPipeHeartbeatReporter, SetupRequestCallbacks),
-                    HeartbeatIn.Start(heartbeatHandler)
-                )
+                //first complete all server connections
+                .WhenAll(RequestIn.ServerTask, HeartbeatIn.ServerTask)
                 //wait also until we complete all client connections
                 .ContinueWith(_ => ReplyOut.ClientTask, CancellationToken.None).Unwrap()
                 .ContinueWith(_ => ConnectionPool.DisposeAsync().AsTask(), CancellationToken.None).Unwrap()
@@ -134,7 +133,7 @@ public class PipeTransportServer
         {
             _logger.LogWarning(e, "unable to consume message {MessageId} due to error, reply error back to client", requestContainer.Handle.Id);
             requestContainer.ResponseMessage.SetRequestException(e);
-            await ReplyOut.PublishResponseMessage(requestContainer.Handle);
+            await ReplyOut.Publish(requestContainer.Handle);
             return false;
         }
     }
@@ -169,7 +168,7 @@ public class PipeTransportServer
             requestContainer.ResponseMessage.SetRequestException(e);
         }
         heartbeatHandler.EndMessageExecute(requestContainer.Handle.Id);
-        await ReplyOut.PublishResponseMessage(requestContainer.Handle);
+        await ReplyOut.Publish(requestContainer.Handle);
     }
 
     private async Task SendRequest<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
@@ -183,14 +182,14 @@ public class PipeTransportServer
             => _messageWriter.WriteResponse(requestContainer.ResponseMessage, stream, c);        
     }
 
-    private bool ReportError<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, Exception exception)
+    private async ValueTask<bool> ReportError<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, Exception exception)
     {
         if (requestContainer.ResponseMessage.Reply != null && requestContainer.ResponseMessage.ReplyError == null)
         {
             requestContainer.RequestMessage = null;
             requestContainer.ResponseMessage = new PipeMessageResponse<TRep>();
             requestContainer.ResponseMessage.SetRequestException(exception);
-            ReplyOut.PublishResponseMessage(requestContainer.Handle);
+            await ReplyOut.Publish(requestContainer.Handle);
             return true;
         }               
         return false; 

@@ -14,8 +14,8 @@ internal class PipeClientConnection : PipeConnection<NamedPipeClientStream>
     public PipeOptions Options { get; set; } = PipeOptions.Asynchronous | PipeOptions.WriteThrough;
     public PipeDirection Direction => PipeDirection.InOut;
 
-    public PipeClientConnection(ILogger logger, Meter meter, int id, string name, TimeSpan connectionTimeout, TimeSpan connectionRetryTimeout, TimeSpan connectionExpiryTime)
-        : base(logger, id, name, connectionRetryTimeout, connectionExpiryTime)
+    public PipeClientConnection(ILogger logger, Meter meter, int id, string name, TimeSpan connectionTimeout, TimeSpan connectionExpiryTime)
+        : base(id, name, connectionExpiryTime)
     {
         _logger = logger;
         _clientConnectionsCounter = meter.CreateCounter<int>("client-connections");

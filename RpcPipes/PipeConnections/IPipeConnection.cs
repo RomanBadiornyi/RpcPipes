@@ -1,7 +1,7 @@
 namespace RpcPipes.PipeConnections;
 
 public interface IPipeConnection
-{
+{    
     string Name { get; }
     bool InUse { get; }
 

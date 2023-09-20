@@ -6,7 +6,7 @@ using RpcPipes.PipeTransport;
 
 namespace RpcPipes.PipeHandlers;
 
-internal class PipeRequestInHandler
+internal class PipeRequestInHandler : IPipeMessageReceiver
 {
     private readonly static Meter Meter = new(nameof(PipeRequestInHandler));
     private readonly static Counter<int> PendingMessagesCounter = Meter.CreateCounter<int>("pending-messages");
@@ -14,33 +14,30 @@ internal class PipeRequestInHandler
     private readonly static Counter<int> HandledMessagesCounter = Meter.CreateCounter<int>("handled-messages");
 
     private readonly ILogger _logger;
-    private readonly PipeMessageDispatcher _connectionPool;
     private readonly IPipeHeartbeatHandler _heartbeatHandler;
+    private readonly IPipeHeartbeatReporter _heartbeatReporter;
+    private readonly Func<PipeServerRequestMessage, bool> _setupRequest;
 
     public string Pipe { get; }
+    public Task ServerTask { get; }
 
     public PipeRequestInHandler(
         ILogger logger,
         string pipe,
         PipeMessageDispatcher connectionPool,
-        IPipeHeartbeatHandler heartbeatHandler)
+        IPipeHeartbeatHandler heartbeatHandler,
+        IPipeHeartbeatReporter heartbeatReporter,
+        Func<PipeServerRequestMessage, bool> setupRequest)
     {
         _logger = logger;
-        _connectionPool = connectionPool;
         _heartbeatHandler = heartbeatHandler;
+        _heartbeatReporter = heartbeatReporter;
+        _setupRequest = setupRequest;
         Pipe = pipe;
+        ServerTask = connectionPool.ProcessServerMessages(this);
     }
 
-    public Task Start(IPipeHeartbeatReporter heartbeatReporter, Func<PipeServerRequestMessage, bool> setupRequest)
-    {
-        return _connectionPool.ProcessServerMessages(Pipe, ReceiveMessage);
-
-        Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
-            => HandleReceiveMessage(heartbeatReporter, setupRequest, protocol, cancellation);
-    }
-
-    private async Task HandleReceiveMessage(
-        IPipeHeartbeatReporter heartbeatReporter, Func<PipeServerRequestMessage, bool> setupRequest, PipeProtocol protocol, CancellationToken cancellation)
+    public async Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
         PipeServerRequestMessage requestMessage = null;
         var header = await protocol
@@ -48,10 +45,10 @@ internal class PipeRequestInHandler
                 //ensure we add current request to outstanding messages before we complete reading request payload
                 //this way we ensure that when client starts doing heartbeat calls - we already can reply as we know about this message
                 requestMessage = new PipeServerRequestMessage(id, reply);
-                if (!_heartbeatHandler.StartMessageHandling(requestMessage.Id, cancellation, heartbeatReporter))
+                if (!_heartbeatHandler.StartMessageHandling(requestMessage.Id, cancellation, _heartbeatReporter))
                     requestMessage = null;
                 else
-                    setupRequest.Invoke(requestMessage);
+                    _setupRequest.Invoke(requestMessage);
             }, cancellation);
         if (header != null && requestMessage != null)
         {
@@ -91,5 +88,5 @@ internal class PipeRequestInHandler
                 ActiveMessagesCounter.Add(-1);
             }
         }
-    }
+    }    
 }
