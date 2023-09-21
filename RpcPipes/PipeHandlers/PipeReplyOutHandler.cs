@@ -42,11 +42,11 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
 
     public async Task HandleMessage(PipeServerRequestMessage message, PipeProtocol protocol, CancellationToken cancellation)
     {
-        _logger.LogDebug("scheduled reply for message {MessageId}", message.Id);
-        ReplyMessagesCounter.Add(-1);
+        _logger.LogDebug("scheduled reply for message {MessageId}", message.Id);        
         await message.SendResponse.Invoke(protocol, cancellation);            
         _heartbeatHandler.EndMessageHandling(message.Id);
         message.OnMessageCompleted.Invoke(null, true);        
+        ReplyMessagesCounter.Add(-1);
     }
 
     public async ValueTask HandleError(PipeServerRequestMessage message, Exception error)

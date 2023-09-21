@@ -47,9 +47,11 @@ public abstract class PipeConnection<T> : IPipeConnection
                 Used = true;
 
                 shouldDispatch = usePredicateFunc == null || usePredicateFunc.Invoke(this);
-                LastUsedAt = DateTime.UtcNow;
 
+                LastUsedAt = DateTime.UtcNow;
                 (var connected, error) = await TryConnect(cancellation);
+                LastUsedAt = DateTime.UtcNow;
+                
                 if (error != null)
                     ConnectionErrors += 1;
                 else
