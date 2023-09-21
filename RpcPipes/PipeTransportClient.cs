@@ -25,6 +25,12 @@ public abstract class PipeRequestHandler
 public abstract class PipeTransportClient : PipeRequestHandler
 {
     protected readonly static Meter Meter = new(nameof(PipeTransportClient));
+
+    public abstract PipeConnectionPool ConnectionPool { get; }
+    public abstract PipeMessageDispatcher MessageDispatcher { get; }
+
+    public abstract CancellationTokenSource Cancellation { get; }
+
     public abstract Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken cancellation);
 }
 
@@ -43,10 +49,10 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     internal PipeRequestOutHandler RequestOut { get; }
     internal PipeReplyInHandler ReplyIn { get; }
 
-    public PipeConnectionPool ConnectionPool { get; }
-    public PipeMessageDispatcher MessageDispatcher { get; }
+    public override PipeConnectionPool ConnectionPool { get; }
+    public override PipeMessageDispatcher MessageDispatcher { get; }
 
-    public CancellationTokenSource Cancellation { get; }
+    public override CancellationTokenSource Cancellation { get; }
 
     public PipeTransportClient(
         ILogger<PipeTransportClient<TP>> logger,

@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 
 namespace RpcPipes.PipeConnections;
 
-internal class PipeConnectionGroup<T> where T: IPipeConnection
+public class PipeConnectionGroup<T> where T: IPipeConnection
 {
     private class BrokenConnection
     {
@@ -11,7 +11,7 @@ internal class PipeConnectionGroup<T> where T: IPipeConnection
         public Exception Error { get; set; }
     }
 
-    private EventWaitHandle _newConnectionHandle = new(false, EventResetMode.AutoReset);
+    private EventWaitHandle _newConnectionHandle = new(true, EventResetMode.ManualReset);
     private int _borrowConnectionCounter;
 
     public string Name { get; }
@@ -25,8 +25,10 @@ internal class PipeConnectionGroup<T> where T: IPipeConnection
 
     public DateTime LastUsed { get; private set; }
     public TimeSpan ConnectionRetryTime { get; }
+    public TimeSpan ConnectionResumeTime { get; }
 
-    public PipeConnectionGroup(string name, int instances, Func<int, string, T> connectionFunc, TimeSpan connectionRetryTime)
+    public PipeConnectionGroup(
+        string name, int instances, Func<int, string, T> connectionFunc, TimeSpan connectionRetryTime, TimeSpan connectionResumeTime)
     {
         Name = name;
         FreeConnections = new ConcurrentStack<T>();
@@ -35,6 +37,7 @@ internal class PipeConnectionGroup<T> where T: IPipeConnection
         BrokenConnections = new ConcurrentDictionary<T, BrokenConnection>();
         
         ConnectionRetryTime = connectionRetryTime;        
+        ConnectionResumeTime = connectionResumeTime;
 
         for (var i = 0; i < instances; i++)
         {
@@ -42,7 +45,7 @@ internal class PipeConnectionGroup<T> where T: IPipeConnection
         }
         FreeConnections.PushRange(AllConnections.Values.ToArray());
         SignalNewConnection();
-    }
+    }    
 
     public bool IsUnusedPool(double usageTimeoutMilliseconds)
         => FreeConnections.Count == 0 && IsNotActive() && IsExpired(usageTimeoutMilliseconds);
@@ -61,21 +64,19 @@ internal class PipeConnectionGroup<T> where T: IPipeConnection
             //asynchronously wait for connection to appear in free connection stack (most recently used) or disabled connection 
             T connection = default;
             while (connection == null)
-            {
-                //if no connections has been updated within timeout - return null
-                if (DateTime.UtcNow - LastUsed > ConnectionRetryTime)
-                    break;
-
+            {                
                 if (!FreeConnections.TryPop(out connection) &&
                     !DisabledConnections.TryDequeue(out connection))
                 {
+                    _newConnectionHandle.Reset();
                     var tcs = new TaskCompletionSource<bool>();
                     var waitRegister = ThreadPool.RegisterWaitForSingleObject(_newConnectionHandle,
                         (state, timedOut) => ((TaskCompletionSource<bool>)state).TrySetResult(!timedOut), tcs, timeout, true);
-                    var signaled = await tcs.Task;
-                    if (!signaled)
-                        continue;
+                    await tcs.Task;
                 }
+                //if no connections has been updated within timeout - return null
+                if (DateTime.UtcNow - LastUsed > ConnectionRetryTime)
+                    break;
             }
             AggregateException errors = null; 
             if (connection == null)
@@ -122,7 +123,7 @@ internal class PipeConnectionGroup<T> where T: IPipeConnection
             if (BrokenConnections.TryRemove(connection, out var brokenConnection))
             {                
                 var errorsCount = Math.Max(brokenConnection.Connection.ConnectionErrors, 10);
-                var disabledTime = TimeSpan.FromMilliseconds(ConnectionRetryTime.TotalMilliseconds * Math.Pow(2, errorsCount));
+                var disabledTime = TimeSpan.FromMilliseconds(ConnectionResumeTime.TotalMilliseconds * Math.Pow(2, errorsCount));
                 if (current > brokenConnection.DisableTime + disabledTime)
                 {
                     DisabledConnections.Enqueue(brokenConnection.Connection);

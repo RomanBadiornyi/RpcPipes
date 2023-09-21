@@ -163,7 +163,7 @@ public class BasePipeClientServerTests
         ServerStop = new CancellationTokenSource();
         ServerStop.CancelAfter(ServerTimeout);
         ServerTask = Task.CompletedTask;
-    }
+    }    
 
     [TearDown]
     public void CleanupServer()   
@@ -172,5 +172,13 @@ public class BasePipeClientServerTests
             ServerStop.Cancel();        
         ServerTask.Wait();
         ServerStop.Dispose();
+    }
+
+    public void SetupClient(PipeTransportClient client)
+    {
+        client.Cancellation.CancelAfter(ClientRequestTimeout);
+        client.ConnectionPool.ConnectionTimeout = TimeSpan.FromMilliseconds(5);
+        client.ConnectionPool.ConnectionRetryTimeout = TimeSpan.FromMilliseconds(10);
+        client.ConnectionPool.ConnectionReleaseTimeout = TimeSpan.FromMilliseconds(10);            
     }
 }

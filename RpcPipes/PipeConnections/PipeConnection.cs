@@ -18,7 +18,7 @@ public abstract class PipeConnection<T> : IPipeConnection
     public DateTime LastUsedAt { get; private set; }
     public TimeSpan ConnectionExpiryTime { get; }
 
-    public int ConnectionErrors { get; private set; }
+    public virtual int ConnectionErrors { get; private set; }
 
     protected PipeConnection(int id, string name, TimeSpan connectionExpiryTime)
     {

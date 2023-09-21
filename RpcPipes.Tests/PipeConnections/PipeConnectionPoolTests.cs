@@ -10,8 +10,8 @@ namespace RpcPipes.Tests.PipeConnections;
 [TestFixture]
 public class PipeConnectionPoolTests
 {
-    private readonly Meter _meter = new(nameof(PipeConnectionPoolTests));
     private readonly ILogger _logger = new NUnitLogger(nameof(PipeConnectionPoolTests));
+    private readonly Meter _meter = new(nameof(PipeConnectionPoolTests));    
 
     private PipeConnectionPool _connectionPool;
     private CancellationTokenSource _cancellationSource;

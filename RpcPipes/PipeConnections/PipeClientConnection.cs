@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeConnections;
 
-internal class PipeClientConnection : PipeConnection<NamedPipeClientStream>
+public class PipeClientConnection : PipeConnection<NamedPipeClientStream>
 {
     private readonly ILogger _logger;
     private readonly Counter<int> _clientConnectionsCounter;
