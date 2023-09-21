@@ -73,6 +73,12 @@ public class PipeMessageDispatcher
             var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
             await messageReceiver.ReceiveMessage(protocol, _cancellation);
         }
+
+        bool IsConnectionCancelled(Exception e, bool dispatched) => 
+            (e is OperationCanceledException) && !dispatched;
+
+        bool IsConnectionInterrupted(Exception e, bool connected) => 
+            (e is PipeNetworkException || e is OperationCanceledException) && !connected;        
     }
 
     private async Task RunClientMessageLoop<T>(Channel<T> messagesQueue, IPipeMessageSender<T> messageSender)
@@ -92,11 +98,14 @@ public class PipeMessageDispatcher
 
             var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);            
             //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
-            if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
+            if (error != null && 
+                !IsConnectionCancelled(error, dispatched) && 
+                !IsConnectionTimeout(error, dispatched) && 
+                !IsConnectionInterrupted(error, connected))
             {
                 _logger.LogError(error, 
                     "error occurred while processing message {MessageId} on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
-                    item.Id, pipeName, connected, dispatched);
+                    item.Id, pipeName, connected, dispatched);                
             }
 
             //if message was not dispatched - report error to handler and let it handle that            
@@ -118,10 +127,14 @@ public class PipeMessageDispatcher
                     await messageSender.HandleMessage(item, protocol, _cancellation);
             }
         }
-    }
+        
+        bool IsConnectionCancelled(Exception e, bool dispatched) => 
+            (e is OperationCanceledException) && !dispatched;
 
-    private bool IsConnectionCancelled(Exception e, bool dispatched) => 
-        (e is TimeoutException) && !dispatched;
-    private bool IsConnectionInterrupted(Exception e, bool connected) => 
-        (e is PipeNetworkException || e is TimeoutException) && !connected;
+        bool IsConnectionTimeout(Exception e, bool dispatched) => 
+            (e is TimeoutException) && !dispatched;
+
+        bool IsConnectionInterrupted(Exception e, bool connected) => 
+            (e is PipeNetworkException || e is TimeoutException) && !connected;
+    }    
 }
