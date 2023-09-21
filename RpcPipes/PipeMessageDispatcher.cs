@@ -99,8 +99,8 @@ public class PipeMessageDispatcher
                     item.Id, pipeName, connected, dispatched);
             }
 
-            //if message was not dispatched - report error to handler and let it handle that
-            if (!dispatched && error != null)
+            //if message was not dispatched - report error to handler and let it handle that            
+            if (!dispatched && error != null && error is not OperationCanceledException)
                 await messageSender.HandleError(item, error);
 
             bool ShouldDispatchMessage(IPipeConnection connection)
@@ -121,7 +121,7 @@ public class PipeMessageDispatcher
     }
 
     private bool IsConnectionCancelled(Exception e, bool dispatched) => 
-        (e is OperationCanceledException || e is TimeoutException) && !dispatched;
+        (e is TimeoutException) && !dispatched;
     private bool IsConnectionInterrupted(Exception e, bool connected) => 
-        (e is PipeNetworkException || e is OperationCanceledException || e is TimeoutException) && !connected;
+        (e is PipeNetworkException || e is TimeoutException) && !connected;
 }

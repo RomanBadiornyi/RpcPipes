@@ -65,12 +65,12 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
             //we did retry 3 times, if still no luck - drop message
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
             requestMessage.OnMessageCompleted.Invoke(e, false);
-            _logger.LogError(e, "unable to send message {MessageId} due to error {ErrorMessage}", requestMessage.Id, requestMessage.Id, e.Message);
+            _logger.LogError(e, "unable to send message {MessageId} due to error '{ErrorMessage}'", requestMessage.Id, requestMessage.Id, e.Message);
         }
         else
         {
             //publish to retry
-            _logger.LogDebug("retry sending reply for message {MessageId} due to error {ErrorMessage}", requestMessage.Id, e.Message);
+            _logger.LogDebug("retry sending reply for message {MessageId} due to error '{ErrorMessage}'", requestMessage.Id, e.Message);
             await Publish(requestMessage);
         }
     }

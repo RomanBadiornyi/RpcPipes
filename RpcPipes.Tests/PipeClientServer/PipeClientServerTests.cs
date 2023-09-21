@@ -325,7 +325,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
                 ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer);
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage($"{i}", 0);
+            var request = new PipeRequestMessage($"{i}", 0.1);
             var requestContext = new PipeRequestContext();
             var reply = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
             replies.Add(reply);
