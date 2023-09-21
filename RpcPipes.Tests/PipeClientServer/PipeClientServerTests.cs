@@ -38,6 +38,29 @@ public class PipeClientServerTests : BasePipeClientServerTests
     }
 
     [Test]
+    public async Task RequestReply_WhenNoConnectionWithServer_ReplyError()
+    {
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+
+        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+            ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
+        {
+            pipeClient.ConnectionPool.ConnectionTimeout = TimeSpan.FromMilliseconds(5);
+            pipeClient.ConnectionPool.ConnectionRetryTimeout = TimeSpan.FromMilliseconds(10);
+            pipeClient.ConnectionPool.ConnectionReleaseTimeout = TimeSpan.FromMilliseconds(10);            
+
+            pipeClient.Cancellation.CancelAfter(ClientRequestTimeout);
+            var request = new PipeRequestMessage("hello world", 10);
+            var requestContext = new PipeRequestContext();
+            var exception = Assert.ThrowsAsync<IndexOutOfRangeException>(() =>
+                pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
+            Assert.That(exception, Is.Not.Null);
+            Assert.That(exception.Message, Does.Contain("Run out of available"));
+            Assert.That(exception.InnerException.Message, Does.Contain("timeout"));
+        }
+    }
+
+    [Test]
     public async Task RequestReply_OnDeadline_ReplyCancelled()
     {
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
@@ -426,7 +449,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
     }
 
     [Test]
-    public async Task RequestReplyWhenHandlerThrows_ErrorReturned()
+    public async Task RequestReply_WhenHandlerThrows_ErrorReturned()
     {
         var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
         messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())

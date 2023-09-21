@@ -56,7 +56,11 @@ public class PipeMessageDispatcher
         {
             var (connected, dispatched, error) = await _connectionPool.UseServerConnection(messageReceiver.Pipe, ShouldDispatchMessage, DispatchMessage);
             if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
-                _logger.LogError(error, "error occurred while waiting for message on pipe stream {PipeName}, dispatched '{Dispatched}'", messageReceiver.Pipe, dispatched);
+            {
+                _logger.LogError(error, 
+                    "error occurred while waiting for message on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
+                    messageReceiver.Pipe, connected, dispatched);
+            }
         }
 
         bool ShouldDispatchMessage(IPipeConnection connection)
@@ -86,13 +90,18 @@ public class PipeMessageDispatcher
             var item = await messagesQueue.Reader.ReadAsync(_cancellation);
             var pipeName = messageSender.TargetPipe(item);
 
-            var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);
+            var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);            
+            //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
+            if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
+            {
+                _logger.LogError(error, 
+                    "error occurred while processing message {MessageId} on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
+                    item.Id, pipeName, connected, dispatched);
+            }
+
             //if message was not dispatched - report error to handler and let it handle that
             if (!dispatched && error != null)
                 await messageSender.HandleError(item, error);
-            //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
-            if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
-                _logger.LogError(error, "error occurred while processing message {MessageId} on pipe stream {PipeName}, dispatched '{Dispatched}'", item.Id, pipeName, dispatched);
 
             bool ShouldDispatchMessage(IPipeConnection connection)
             {

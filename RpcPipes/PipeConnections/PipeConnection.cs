@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using RpcPipes.PipeExceptions;
 
 namespace RpcPipes.PipeConnections;
 
@@ -28,42 +29,64 @@ public abstract class PipeConnection<T> : IPipeConnection
     }
 
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseConnection(
-        Func<T, Task> useFunc,         
-        Func<IPipeConnection, bool> usePredicateFunc, 
+        Func<T, Task> useFunc,
+        Func<IPipeConnection, bool> usePredicateFunc,
         CancellationToken cancellation)
     {
-        try
+        var retries = 0;
+        var maxRetries = 1;
+        var shouldRetry = true;
+        var shouldDispatch = false;
+        Exception error = null;
+
+        while (shouldRetry)
         {
-            Used = true;
-            
-            var shouldDispatch = usePredicateFunc == null || usePredicateFunc.Invoke(this);
-            LastUsedAt = DateTime.UtcNow;            
-            
-            var (connected, error) = await TryConnect(cancellation);            
-            
-            if  (connected && shouldDispatch)
+            try
             {
+                shouldRetry = false;
+                Used = true;
+
+                shouldDispatch = usePredicateFunc == null || usePredicateFunc.Invoke(this);
                 LastUsedAt = DateTime.UtcNow;
-                await useFunc.Invoke(Connection);
-                LastUsedAt = DateTime.UtcNow;
-                return (VerifyIfConnected(), true, error);
-            }                        
-            if (!shouldDispatch)
+
+                (var connected, error) = await TryConnect(cancellation);
+                if (error != null)
+                    ConnectionErrors += 1;
+                else
+                    ConnectionErrors = 0;
+
+                if  (connected && shouldDispatch)
+                {
+                    LastUsedAt = DateTime.UtcNow;
+                    await useFunc.Invoke(Connection);
+                    LastUsedAt = DateTime.UtcNow;
+                    return (VerifyIfConnected(), true, error);
+                }
+            }
+            //connection could be dropped on invocation, in that case simply retry invocation
+            catch (PipeNetworkException e) when (VerifyIfConnected() == false && retries < maxRetries && shouldDispatch)
             {
-                return (VerifyIfConnected(), true, error);
-            }            
-            return (VerifyIfConnected(), false, error);
+                Disconnect($"error: {e.Message}");
+                shouldRetry = true;
+                retries++;
+            }
+            //otherwise report error
+            catch (Exception e)
+            {
+                var reason = e is OperationCanceledException ? "cancelled" : $"error: {e.Message}";
+                Disconnect(reason);
+                return (VerifyIfConnected(), false, e);
+            }
+            finally
+            {
+                Used = false;
+            }
         }
-        catch (Exception e)
-        {         
-            var reason = e is OperationCanceledException ? "cancelled" : $"error: {e.Message}";
-            Disconnect(reason);
-            return (VerifyIfConnected(), false, e);
-        }
-        finally
-        {
-            Used = false;
-        }
+
+        if (!shouldDispatch)
+            return (VerifyIfConnected(), true, error);
+
+        return (VerifyIfConnected(), false, error);
     }
 
     public bool VerifyIfConnected()

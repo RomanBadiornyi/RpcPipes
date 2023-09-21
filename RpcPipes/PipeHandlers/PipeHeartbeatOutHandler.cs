@@ -74,8 +74,8 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         }
     }
 
-    public override ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error)
-        => new ValueTask();
+    public override async ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error)
+        => await TryRedoHeartbeat(message, CancellationToken.None);
 
     private static async Task<bool> ReadyForHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, CancellationToken cancellation)
     {
