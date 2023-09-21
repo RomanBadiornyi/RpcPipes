@@ -52,7 +52,7 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
     public async ValueTask HandleError(PipeServerRequestMessage message, Exception error)
     {
         if (error is PipeDataException)
-            await ReportErrorOrCompleteAsync(message, error);            
+            await ReportErrorOrComplete(message, error);            
         else 
             await RetryOrComplete(message, error);
     }        
@@ -65,16 +65,17 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
             //we did retry 3 times, if still no luck - drop message
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
             requestMessage.OnMessageCompleted.Invoke(e, false);
-            _logger.LogError(e, "unable to send message {MessageId} due to error", requestMessage.Id);
+            _logger.LogError(e, "unable to send message {MessageId} due to error {ErrorMessage}", requestMessage.Id, requestMessage.Id, e.Message);
         }
         else
         {
             //publish to retry
+            _logger.LogDebug("retry sending reply for message {MessageId} due to error {ErrorMessage}", requestMessage.Id, e.Message);
             await Publish(requestMessage);
         }
     }
 
-    private async Task ReportErrorOrCompleteAsync(PipeServerRequestMessage requestMessage, Exception e)
+    private async Task ReportErrorOrComplete(PipeServerRequestMessage requestMessage, Exception e)
     {
         requestMessage.Retries += 1;
         if (requestMessage.Retries >= 3 || !await requestMessage.ReportError(e))

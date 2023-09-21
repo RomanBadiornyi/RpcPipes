@@ -68,12 +68,13 @@ internal class PipeRequestOutHandler : IPipeMessageSender<PipeClientRequestMessa
         if (requestMessage.Retries < 3)
         {
             //push message back to the channel so we will attempt to retry sending it
-            await Publish(requestMessage);
+            _logger.LogDebug(e, "retry sending request message {MessageId} due to error {ErrorMessage}", requestMessage.Id, e.Message);
+            await Publish(requestMessage);            
         }
         else
         {
             requestMessage.RequestTask.TrySetException(e);
-            _logger.LogError(e, "unable to send message {MessageId} due to error", requestMessage.Id);
+            _logger.LogError(e, "unable to send request message {MessageId} due to error {ErrorMessage}", requestMessage.Id, e.Message);
         }
     }    
 }

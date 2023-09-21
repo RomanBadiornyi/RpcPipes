@@ -68,7 +68,7 @@ public abstract class PipeConnection<T> : IPipeConnection
             //connection could be dropped on invocation, in that case simply retry invocation
             catch (PipeNetworkException e) when (VerifyIfConnected() == false && retries < maxRetries && shouldDispatch)
             {
-                Disconnect($"error: {e.Message}");
+                Disconnect($"connection interrupted error: {e.Message}");
                 shouldRetry = true;
                 retries++;
             }
