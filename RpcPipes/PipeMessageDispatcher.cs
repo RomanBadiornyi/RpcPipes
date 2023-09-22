@@ -2,7 +2,6 @@ using System.IO.Pipes;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using RpcPipes.PipeConnections;
-using RpcPipes.PipeExceptions;
 using RpcPipes.PipeHandlers;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
@@ -54,24 +53,9 @@ public class PipeMessageDispatcher
     {
         while (!_cancellation.IsCancellationRequested)
         {
-            var (connected, dispatched, error) = await _connectionPool.UseServerConnection(messageReceiver.Pipe, ShouldDispatchMessage, DispatchMessage);
+            var (connected, dispatched, error) = await _connectionPool.Server.UseConnection(messageReceiver.Pipe, ShouldDispatchMessage, DispatchMessage);
             if (error != null)
-            {
-                if (error is not OperationCanceledException && error is not TimeoutException)
-                {
-                    _logger.LogError(error, 
-                        "error occurred while waiting for message on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
-                        messageReceiver.Pipe, connected, dispatched);
-                }
-                if (error is OperationCanceledException)
-                {
-                    _logger.LogDebug("waiting for message on pipe stream {PipeName} has been cancelled", messageReceiver.Pipe);                
-                }
-                if (error is TimeoutException)
-                {
-                    _logger.LogDebug("waiting for message on pipe stream {PipeName} has been timed out", messageReceiver.Pipe);                
-                }
-            }            
+                LogError(error, connected, dispatched);
         }
 
         bool ShouldDispatchMessage(IPipeConnection connection)
@@ -83,7 +67,25 @@ public class PipeMessageDispatcher
         {
             var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
             return await messageReceiver.ReceiveMessage(protocol, _cancellation);
-        }     
+        }
+
+        void LogError(Exception error, bool connected, bool dispatched)     
+        {
+            if (error is not OperationCanceledException && error is not TimeoutException)
+            {
+                _logger.LogError(error, 
+                    "error occurred while waiting for message on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
+                    messageReceiver.Pipe, connected, dispatched);
+            }
+            if (error is OperationCanceledException)
+            {
+                _logger.LogDebug("waiting for message on pipe stream {PipeName} has been cancelled", messageReceiver.Pipe);                
+            }
+            if (error is TimeoutException)
+            {
+                _logger.LogDebug("waiting for message on pipe stream {PipeName} has been timed out", messageReceiver.Pipe);                
+            }
+        }
     }
 
     private async Task RunClientMessageLoop<T>(Channel<T> messagesQueue, IPipeMessageSender<T> messageSender)
@@ -110,7 +112,7 @@ public class PipeMessageDispatcher
                 break;
             }
 
-            var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);            
+            var (connected, dispatched, error) = await _connectionPool.Client.UseConnection(pipeName, ShouldDispatchMessage, DispatchMessage);            
             
             if (!dispatched && error != null && error is not OperationCanceledException)
             {           
@@ -119,20 +121,7 @@ public class PipeMessageDispatcher
             }
             else if (error != null)
             {
-                if (error is not OperationCanceledException && error is not TimeoutException)
-                {
-                    _logger.LogError(error, 
-                        "error occurred while processing message {MessageId} on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
-                        item.Id, pipeName, connected, dispatched);                
-                }
-                if (error is OperationCanceledException)
-                {
-                    _logger.LogDebug("processing of message {MessageId} on pipe stream {PipeName} has been cancelled", item.Id, pipeName);                
-                }
-                if (error is TimeoutException)
-                {
-                    _logger.LogDebug("processing of message {MessageId} on pipe stream {PipeName} has been timed out", item.Id, pipeName);                
-                }
+                LogError(error, connected, dispatched);
             }            
 
             bool ShouldDispatchMessage(IPipeConnection connection)
@@ -148,6 +137,24 @@ public class PipeMessageDispatcher
             {
                 var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
                 await messageSender.HandleMessage(item, protocol, _cancellation);
+            }
+
+            void LogError(Exception error, bool connected, bool dispatched)     
+            {
+                if (error is not OperationCanceledException && error is not TimeoutException)
+                {
+                    _logger.LogError(error, 
+                        "error occurred while processing message {MessageId} on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
+                        item.Id, pipeName, connected, dispatched);                
+                }
+                if (error is OperationCanceledException)
+                {
+                    _logger.LogDebug("processing of message {MessageId} on pipe stream {PipeName} has been cancelled", item.Id, pipeName);                
+                }
+                if (error is TimeoutException)
+                {
+                    _logger.LogDebug("processing of message {MessageId} on pipe stream {PipeName} has been timed out", item.Id, pipeName);                
+                }
             }
         }        
     }    

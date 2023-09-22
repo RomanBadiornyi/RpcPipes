@@ -36,7 +36,7 @@ public abstract class PipeTransportClient : PipeRequestHandler
 
 public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncDisposable
     where TP : IPipeHeartbeat
-{    
+{
     private readonly ILogger<PipeTransportClient<TP>> _logger;
 
     private readonly IPipeMessageWriter _messageWriter;
@@ -85,7 +85,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
         HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, MessageDispatcher, heartbeatReceiver, _messageWriter);
         RequestOut = new PipeRequestOutHandler(logger, sendPipe, MessageDispatcher, this);
-        ReplyIn = new PipeReplyInHandler(logger, receivePipe, MessageDispatcher, this);       
+        ReplyIn = new PipeReplyInHandler(logger, receivePipe, MessageDispatcher, this);
     }
 
     internal override PipeClientRequestMessage GetRequestMessageById(Guid id)
@@ -101,7 +101,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken requestCancellation)
     {
         var requestTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        
+
         var heartbeatSync = new SemaphoreSlim(1);
         //cancel request if cancellation received from heartbeat
         using var heartbeatCancellation = new CancellationTokenSource();
@@ -113,7 +113,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         clientStopCancellation.Token.Register(() =>
             requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to cancellation of client")));
 
-        //once all cancellation token callbacks setup - verify if we are not already in cancelled state 
+        //once all cancellation token callbacks setup - verify if we are not already in cancelled state
         //and if so - simply throw
         if (Cancellation.IsCancellationRequested)
             throw new TaskCanceledException("Request cancelled due to cancellation of client");
@@ -155,7 +155,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         }
         catch (OperationCanceledException)
         {
-            requestMessage.RequestCompleted = true;            
+            requestMessage.RequestCompleted = true;
             throw;
         }
         finally
@@ -202,14 +202,13 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     public async ValueTask DisposeAsync()
     {
         Cancellation.Cancel();
-        ConnectionPool.StopConnectionExpiryCheck();
 
-        await Task.WhenAll(RequestOut.ClientTask, HeartbeatOut.ClientTask);        
-        ConnectionPool.StopClientConnections();
-        
+        await Task.WhenAll(RequestOut.ClientTask, HeartbeatOut.ClientTask);
+        ConnectionPool.Client.Dispose();
+
         await ReplyIn.ServerTask;
-        ConnectionPool.StopServerConnections();
+        ConnectionPool.Server.Dispose();
 
-        _logger.LogDebug("client has been disposed");        
+        _logger.LogDebug("client has been disposed");
     }
 }

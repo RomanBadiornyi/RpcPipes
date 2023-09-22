@@ -29,9 +29,8 @@ public class PipeConnectionPoolTests
     [TearDown]
     public void ClearConnectionPool()
     {
-        _connectionPool?.StopClientConnections();
-        _connectionPool?.StopServerConnections();
-        _connectionPool?.StopConnectionExpiryCheck();
+        _connectionPool?.Client.Dispose();
+        _connectionPool?.Server.Dispose();
     }
 
     [Test]
@@ -41,26 +40,25 @@ public class PipeConnectionPoolTests
         {
             ConnectionExpiryTimeout = TimeSpan.FromSeconds(600)
         };
-        var serverTask = _connectionPool.UseServerConnection("PipeConnectionPoolTests", null, async stream => {
+        var serverTask = _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {
             await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
             return false;
         }).AsTask();
         var receivedBuffer = new byte[10];
-        var clientTask = _connectionPool.UseClientConnection("PipeConnectionPoolTests", null, async stream => {
+        var clientTask = _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => {
             using var readWithTimeout = new CancellationTokenSource();
             var _ = await stream.ReadAsync(receivedBuffer, 0, 10, readWithTimeout.Token);
         }).AsTask();
         await Task.WhenAll(serverTask, clientTask);
-        Assert.That(_connectionPool.ConnectionsClient.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
-        Assert.That(_connectionPool.ConnectionsServer.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
+        Assert.That(_connectionPool.Client.Connections.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
+        Assert.That(_connectionPool.Server.Connections.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
 
-        _connectionPool.StopClientConnections();
-        _connectionPool.StopServerConnections();
-        _connectionPool.StopConnectionExpiryCheck();
+        _connectionPool.Client.Dispose();
+        _connectionPool.Server.Dispose();
 
         Assert.That(receivedBuffer[5], Is.EqualTo(5));
-        Assert.That(_connectionPool.ConnectionsClient.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
-        Assert.That(_connectionPool.ConnectionsServer.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
+        Assert.That(_connectionPool.Client.Connections.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
+        Assert.That(_connectionPool.Server.Connections.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
     }
 
     [Test]
@@ -70,24 +68,24 @@ public class PipeConnectionPoolTests
         {
             ConnectionExpiryTimeout = TimeSpan.FromSeconds(600)
         };
-        var serverTask = _connectionPool.UseServerConnection("PipeConnectionPoolTests", null, async stream => {
+        var serverTask = _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {
             await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
             return false;
         }).AsTask();
         var receivedBuffer = new byte[10];
-        var clientTask = _connectionPool.UseClientConnection("PipeConnectionPoolTests", null, async stream => {
+        var clientTask = _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => {
             using var readWithTimeout = new CancellationTokenSource();
             var _ = await stream.ReadAsync(receivedBuffer, 0, 10, readWithTimeout.Token);
         }).AsTask();
         await Task.WhenAll(serverTask, clientTask);
 
-        foreach (var connection in _connectionPool.ConnectionsClient)
+        foreach (var connection in _connectionPool.Client.Connections)
         {
             connection.Disconnect("test");
         }
-        foreach (var connection in _connectionPool.ConnectionsServer)
+        foreach (var connection in _connectionPool.Server.Connections)
         {
-            var useConnection = await _connectionPool.UseServerConnection("PipeConnectionPoolTests", null, async stream => {                
+            var useConnection = await _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {                
                 await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
                 return false;
             });
@@ -117,7 +115,7 @@ public class PipeConnectionPoolTests
                 readWriteTaskHandles.Add(readWriteHandle);
 
                 var readWriteTask = Task.Run(() => {
-                    var serverTask = _connectionPool.UseServerConnection("PipeConnectionPoolTests", null, async stream => {
+                    var serverTask = _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {
                         connections.AddOrUpdate(stream, 1, (_, c) => c + 1);
                         await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
                         readWriteHandle.Set();
@@ -126,7 +124,7 @@ public class PipeConnectionPoolTests
                     }).AsTask();
 
                     var receivedBuffer = new byte[10];
-                    var clientTask = _connectionPool.UseClientConnection("PipeConnectionPoolTests", null, async stream => {
+                    var clientTask = _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => {
                         await stream.ReadAsync(receivedBuffer, 0, 5, _cancellationSource.Token);
                         var _ = readWriteStartHandle.WaitOne(TimeSpan.FromSeconds(5));
                     }).AsTask();
@@ -139,8 +137,8 @@ public class PipeConnectionPoolTests
             await Task.WhenAll(readWriteTasks);
         }
 
-        Assert.That(_connectionPool.ConnectionsClient.ToList(), Has.Count.EqualTo(_connectionPool.Instances));
-        Assert.That(_connectionPool.ConnectionsServer.ToList(), Has.Count.EqualTo(_connectionPool.Instances));
+        Assert.That(_connectionPool.Client.Connections.ToList(), Has.Count.EqualTo(_connectionPool.Instances));
+        Assert.That(_connectionPool.Server.Connections.ToList(), Has.Count.EqualTo(_connectionPool.Instances));
         //verify all connections have been used equal number of times
         Assert.That(connections.Values.Distinct().ToList(), Has.Count.EqualTo(1));
     }
@@ -152,21 +150,22 @@ public class PipeConnectionPoolTests
         {
             ConnectionExpiryTimeout = TimeSpan.FromSeconds(600)
         };
-        var serverTask = _connectionPool.UseServerConnection("PipeConnectionPoolTests", null, async stream => {
+        var serverTask = _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {
             await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
             return false;
         }).AsTask();
         var receivedBuffer = new byte[10];
-        var clientTask = _connectionPool.UseClientConnection("PipeConnectionPoolTests", null, async stream => {
+        var clientTask = _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => {
             using var readWithTimeout = new CancellationTokenSource();
             var _ = await stream.ReadAsync(receivedBuffer, 0, 10, readWithTimeout.Token);
         }).AsTask();
         await Task.WhenAll(serverTask, clientTask);
-        Assert.That(_connectionPool.ConnectionsClient.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
-        Assert.That(_connectionPool.ConnectionsServer.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
-        _connectionPool.Cleanup();
-        Assert.That(_connectionPool.ConnectionsClient.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
-        Assert.That(_connectionPool.ConnectionsServer.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
+        Assert.That(_connectionPool.Client.Connections.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
+        Assert.That(_connectionPool.Server.Connections.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
+        _connectionPool.Server.Cleanup();
+        _connectionPool.Client.Cleanup();
+        Assert.That(_connectionPool.Client.Connections.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
+        Assert.That(_connectionPool.Server.Connections.Where(c => c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(1));
     }
 
     [Test]
@@ -177,23 +176,23 @@ public class PipeConnectionPoolTests
             ConnectionExpiryTimeout = TimeSpan.FromSeconds(600)
         };
         var receiveSync = new ManualResetEventSlim(false);
-        var serverTask = _connectionPool.UseServerConnection("PipeConnectionPoolTests", null, async stream => {
+        var serverTask = _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {
             await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
             receiveSync.Wait(_cancellationSource.Token);
             throw new InvalidOperationException();
         }).AsTask();
         var receivedBuffer = new byte[10];
-        var clientTask = _connectionPool.UseClientConnection("PipeConnectionPoolTests", null, async stream => {
+        var clientTask = _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => {
             using var readWithTimeout = new CancellationTokenSource();
             var _ = await stream.ReadAsync(receivedBuffer, 0, 10, readWithTimeout.Token);
             receiveSync.Set();
             throw new InvalidOperationException();
         }).AsTask();
         await Task.WhenAll(serverTask, clientTask);
-        Assert.That(_connectionPool.ConnectionsClient.ToList(), Has.Count.EqualTo(1));
-        Assert.That(_connectionPool.ConnectionsServer.ToList(), Has.Count.EqualTo(1));
-        Assert.That(_connectionPool.ConnectionsClient.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
-        Assert.That(_connectionPool.ConnectionsServer.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
+        Assert.That(_connectionPool.Client.Connections.ToList(), Has.Count.EqualTo(1));
+        Assert.That(_connectionPool.Server.Connections.ToList(), Has.Count.EqualTo(1));
+        Assert.That(_connectionPool.Client.Connections.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
+        Assert.That(_connectionPool.Server.Connections.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
     }
 
     [Test]
@@ -217,7 +216,7 @@ public class PipeConnectionPoolTests
                 var receivedBuffer = new byte[10];
                 while (!timeout.IsCancellationRequested)
                 {
-                    await _connectionPool.UseServerConnection("PipeConnectionPoolTests", null, async stream => {
+                    await _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {
                         var _ = await stream.ReadAsync(receivedBuffer, 0, 10, timeout.Token);
                         return false;
                     });
@@ -228,7 +227,7 @@ public class PipeConnectionPoolTests
             clientTasks.Add(Task.Run(async () => {
                 while (!timeout.IsCancellationRequested)
                 {
-                    await _connectionPool.UseClientConnection("PipeConnectionPoolTests", null, async stream => {
+                    await _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => {
                         WaitHandleWithCancellation(clientRelease, timeout.Token);
                         await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), timeout.Token);
                     });
@@ -261,9 +260,8 @@ public class PipeConnectionPoolTests
         Assert.That(receivedMessages, Is.EqualTo(8));
 
         testTimeout.Cancel();
-        _connectionPool.StopClientConnections();
-        _connectionPool.StopServerConnections();
-        _connectionPool.StopConnectionExpiryCheck();
+        _connectionPool.Client.Dispose();
+        _connectionPool.Server.Dispose();
         await Task.WhenAll(clientTasks.Concat(serverTasks));
     }
 
