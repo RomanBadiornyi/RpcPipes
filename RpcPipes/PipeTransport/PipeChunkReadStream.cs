@@ -157,13 +157,13 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        while (!_closed)
+        while (!_closed && !_cancellation.IsCancellationRequested)
             await FillBufferAsync(_cancellation);
     }
 
     protected override void Dispose(bool disposing)
     {
-        while (!_closed)
+        while (!_closed && !_cancellation.IsCancellationRequested)
             FillBuffer();
     }
 
@@ -227,7 +227,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            throw;
+            return 0;
         }
         catch (Exception e)
         {

@@ -55,11 +55,19 @@ public class PipeMessageDispatcher
         while (!_cancellation.IsCancellationRequested)
         {
             var (connected, dispatched, error) = await _connectionPool.UseServerConnection(messageReceiver.Pipe, ShouldDispatchMessage, DispatchMessage);
-            if (error != null && !IsConnectionCancelled(error, dispatched) && !IsConnectionInterrupted(error, connected))
+            if (error != null && error is not OperationCanceledException && error is not TimeoutException)
             {
                 _logger.LogError(error, 
                     "error occurred while waiting for message on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
                     messageReceiver.Pipe, connected, dispatched);
+            }
+            if (error != null && error is OperationCanceledException)
+            {
+                _logger.LogDebug("waiting for message on pipe stream {PipeName} has been cancelled", messageReceiver.Pipe);                
+            }
+            if (error != null && error is TimeoutException)
+            {
+                _logger.LogDebug("waiting for message on pipe stream {PipeName} has been timed out", messageReceiver.Pipe);                
             }
         }
 
@@ -72,13 +80,7 @@ public class PipeMessageDispatcher
         {
             var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
             await messageReceiver.ReceiveMessage(protocol, _cancellation);
-        }
-
-        bool IsConnectionCancelled(Exception e, bool dispatched) => 
-            (e is OperationCanceledException) && !dispatched;
-
-        bool IsConnectionInterrupted(Exception e, bool connected) => 
-            (e is PipeNetworkException || e is OperationCanceledException) && !connected;        
+        }     
     }
 
     private async Task RunClientMessageLoop<T>(Channel<T> messagesQueue, IPipeMessageSender<T> messageSender)
@@ -98,14 +100,19 @@ public class PipeMessageDispatcher
 
             var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);            
             //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
-            if (error != null && 
-                !IsConnectionCancelled(error, dispatched) && 
-                !IsConnectionTimeout(error, dispatched) && 
-                !IsConnectionInterrupted(error, connected))
+            if (error != null && error is not OperationCanceledException && error is not TimeoutException)
             {
                 _logger.LogError(error, 
                     "error occurred while processing message {MessageId} on pipe stream {PipeName}, connected '{Connected}', dispatched '{Dispatched}'", 
                     item.Id, pipeName, connected, dispatched);                
+            }
+            if (error != null && error is OperationCanceledException)
+            {
+                _logger.LogDebug("processing of message {MessageId} on pipe stream {PipeName} has been cancelled", item.Id, pipeName);                
+            }
+            if (error != null && error is TimeoutException)
+            {
+                _logger.LogDebug("processing of message {MessageId} on pipe stream {PipeName} has been timed out", item.Id, pipeName);                
             }
 
             //if message was not dispatched - report error to handler and let it handle that            
@@ -126,15 +133,6 @@ public class PipeMessageDispatcher
                 var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
                     await messageSender.HandleMessage(item, protocol, _cancellation);
             }
-        }
-        
-        bool IsConnectionCancelled(Exception e, bool dispatched) => 
-            (e is OperationCanceledException) && !dispatched;
-
-        bool IsConnectionTimeout(Exception e, bool dispatched) => 
-            (e is TimeoutException) && !dispatched;
-
-        bool IsConnectionInterrupted(Exception e, bool connected) => 
-            (e is PipeNetworkException || e is TimeoutException) && !connected;
+        }        
     }    
 }

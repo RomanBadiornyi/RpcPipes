@@ -316,27 +316,31 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_MultipleClients_AllResponsesReceived()
     {
-        var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 4, Serializer);
+        const int clientsCount = 4;
+        var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", clientsCount, Serializer);
         ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
         var replies = new ConcurrentBag<PipeReplyMessage>();
-        var clientTasks = Enumerable.Range(0, 4).Select(async i => {
-            var clientId = $"{TestContext.CurrentContext.Test.Name}.{i}";
-            await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
-                ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer);
-            SetupClient(pipeClient);
-            var request = new PipeRequestMessage($"{i}", 0.1);
-            var requestContext = new PipeRequestContext();
-            var reply = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
-            replies.Add(reply);
-        }).ToArray();
-
-        await Task.WhenAll(clientTasks);
+        var clientTasks = Enumerable.Range(0, clientsCount).Select(i => RunRequestOnClient(i, replies)).ToArray();
+        await Task.WhenAll(clientTasks);        
 
         var replyMessages = replies.Select(r => r.Reply).ToList();
-        foreach (var index in Enumerable.Range(0, 4))
+        foreach (var index in Enumerable.Range(0, clientsCount))
         {
             Assert.That(replyMessages, Has.Member($"{index}"));
+        }
+
+        async Task RunRequestOnClient(int clientNum, ConcurrentBag<PipeReplyMessage> results)
+        {
+            var clientId = $"{TestContext.CurrentContext.Test.Name}.{clientNum}";
+            await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+                ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer);
+            SetupClient(pipeClient);                
+
+            var request = new PipeRequestMessage($"{clientNum}", 0);
+            var requestContext = new PipeRequestContext();
+            var reply = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            results.Add(reply);
         }
     }
 

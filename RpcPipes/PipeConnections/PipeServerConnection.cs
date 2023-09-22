@@ -46,7 +46,7 @@ public class PipeServerConnection : PipeConnection<NamedPipeServerStream>
         {
             Connected = false;
             _logger.LogDebug("connection to {Type} stream pipe {Pipe} closed", "server", Name);
-            return (Connected, ex);
+            return (Connected, new TimeoutException("server connection timeout", ex));            
 
         }
         catch (IOException ex)

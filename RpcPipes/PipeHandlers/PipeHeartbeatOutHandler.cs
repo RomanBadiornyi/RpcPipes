@@ -53,13 +53,14 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
 
     public override async Task HandleMessage(PipeClientHeartbeatMessage message, PipeProtocol protocol, CancellationToken cancellation)
     {
+        if (cancellation.IsCancellationRequested || message.RequestCompleted)
+            return;        
+            
         if (!await ReadyForHeartbeat(message, cancellation))
         {
             await TryRedoHeartbeat(message, cancellation);
             return;
         }
-        if (cancellation.IsCancellationRequested)
-            return;
         await message.HeartbeatCheckHandle.WaitAsync(cancellation);
         try
         {
@@ -82,7 +83,14 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         var lastCheckInterval = DateTime.Now - heartbeatMessage.HeartbeatCheckTime;
         if (lastCheckInterval < heartbeatMessage.HeartbeatCheckFrequency)
         {
-            await Task.Delay(heartbeatMessage.HeartbeatCheckFrequency - lastCheckInterval, cancellation);
+            try
+            {
+                await Task.Delay(heartbeatMessage.HeartbeatCheckFrequency - lastCheckInterval, cancellation);
+            }
+            catch (OperationCanceledException)
+            {                
+                return false;
+            }            
             return false;
         }
         return true;

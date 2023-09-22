@@ -180,8 +180,8 @@ public class PipeConnectionPool : IAsyncDisposable
     {
         _expiryTimer?.Dispose();
         _expiryTimer = null;
-        Release(_connectionsClient, _ => true, "disposed", "client");
-        Release(_connectionsServer, _ => true, "disposed", "server");
+        Release(_connectionsClient, _ => true, "client", "disposed");
+        Release(_connectionsServer, _ => true, "server", "disposed");
         await Task.CompletedTask;
     }
 }
