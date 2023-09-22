@@ -16,7 +16,7 @@ public class PipeConnectionGroupTests
     [Test]
     public async Task BorrowConnection_WhenBrokenConnectionRestored_RestoredConnectionReturned()
     {
-        var connectionGroup = new PipeConnectionGroup<PipeClientConnection>("test", 3, DummyConnection, TimeSpan.FromSeconds(30), TimeSpan.Zero);
+        var connectionGroup = new PipeConnectionGroup<PipeClientConnection>(_logger, "test", 3, DummyConnection, TimeSpan.FromSeconds(30), TimeSpan.Zero);
         for (var i = 0; i < 3; i++)
         {
             var (connection, error) = await connectionGroup.BorrowConnection(0);

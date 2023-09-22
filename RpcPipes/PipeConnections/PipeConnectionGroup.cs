@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeConnections;
 
@@ -13,6 +14,7 @@ public class PipeConnectionGroup<T> where T: IPipeConnection
 
     private EventWaitHandle _newConnectionHandle = new(true, EventResetMode.ManualReset);
     private int _borrowConnectionCounter;
+    private ILogger _logger;
 
     public string Name { get; }
     private ConcurrentStack<T> FreeConnections { get; }
@@ -28,8 +30,9 @@ public class PipeConnectionGroup<T> where T: IPipeConnection
     public TimeSpan ConnectionResumeTime { get; }
 
     public PipeConnectionGroup(
-        string name, int instances, Func<int, string, T> connectionFunc, TimeSpan connectionRetryTime, TimeSpan connectionResumeTime)
+        ILogger logger, string name, int instances, Func<int, string, T> connectionFunc, TimeSpan connectionRetryTime, TimeSpan connectionResumeTime)
     {
+        _logger = logger;
         Name = name;
         FreeConnections = new ConcurrentStack<T>();
         DisabledConnections = new ConcurrentQueue<T>();
@@ -98,11 +101,13 @@ public class PipeConnectionGroup<T> where T: IPipeConnection
             connection.Disconnect(reason);
             if (connection.ConnectionErrors > 1)
             {
+                _logger.LogInformation("paused connection {Pipe} due to connection error {Reason}", connection.Name, reason);
                 var brokenConnection = new BrokenConnection { Connection = connection, DisableTime = DateTime.UtcNow, Error = error };
                 BrokenConnections.TryAdd(connection, brokenConnection);
             }   
             else 
             {
+                _logger.LogInformation("disabled connection {Pipe} due to connection error {Reason}", connection.Name, reason);
                 DisabledConnections.Enqueue(connection);
                 SignalNewConnection();
             }         
@@ -126,6 +131,7 @@ public class PipeConnectionGroup<T> where T: IPipeConnection
                 var disabledTime = TimeSpan.FromMilliseconds(ConnectionResumeTime.TotalMilliseconds * Math.Pow(2, errorsCount));
                 if (current > brokenConnection.DisableTime + disabledTime)
                 {
+                    _logger.LogInformation("restored connection {Pipe} with number of errors {ErrorsCount}", connection.Name, connection.ConnectionErrors);
                     DisabledConnections.Enqueue(brokenConnection.Connection);
                     SignalNewConnection();
                 }

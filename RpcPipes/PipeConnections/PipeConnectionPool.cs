@@ -65,7 +65,7 @@ public class PipeConnectionPool : IAsyncDisposable
         PipeConnectionGroup<PipeClientConnection> CreateNewConnectionPool(string name)
 {
             _logger.LogInformation("created connection pool {PoolName} of type {Type}", name, "client");
-            return new(name, Instances, CreateNewConnection, ConnectionRetryTimeout, ConnectionRetryTimeout);
+            return new(_logger, name, Instances, CreateNewConnection, ConnectionRetryTimeout, ConnectionRetryTimeout);
         }
 
         PipeClientConnection CreateNewConnection(int id, string name)
@@ -87,7 +87,7 @@ public class PipeConnectionPool : IAsyncDisposable
         PipeConnectionGroup<PipeServerConnection> CreateNewConnectionPool(string name)
         {
             _logger.LogInformation("created connection pool {PoolName} of type {Type}", name, "server");
-            return new(name, Instances, CreateNewConnection, ConnectionRetryTimeout, ConnectionRetryTimeout);
+            return new(_logger, name, Instances, CreateNewConnection, ConnectionRetryTimeout, ConnectionRetryTimeout);
         }
 
         PipeServerConnection CreateNewConnection(int id, string name)
