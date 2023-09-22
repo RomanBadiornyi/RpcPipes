@@ -84,7 +84,7 @@ public class PipeTransportServer
                 //first complete all server connections
                 .WhenAll(RequestIn.ServerTask, HeartbeatIn.ServerTask)                
                 //wait also until we complete all client connections
-                .ContinueWith(_ => ConnectionPool.Dispose(), CancellationToken.None)
+                .ContinueWith(_ => ConnectionPool.StopConnectionExpiryCheck(), CancellationToken.None)
                 .ContinueWith(_ => ConnectionPool.StopServerConnections(), CancellationToken.None)
                 .ContinueWith(_ => ReplyOut.ClientTask, CancellationToken.None).Unwrap()
                 .ContinueWith(_ => ConnectionPool.StopClientConnections(), CancellationToken.None)

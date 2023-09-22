@@ -202,7 +202,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     public async ValueTask DisposeAsync()
     {
         Cancellation.Cancel();
-        ConnectionPool.Dispose();
+        ConnectionPool.StopConnectionExpiryCheck();
 
         await Task.WhenAll(RequestOut.ClientTask, HeartbeatOut.ClientTask);        
         ConnectionPool.StopClientConnections();

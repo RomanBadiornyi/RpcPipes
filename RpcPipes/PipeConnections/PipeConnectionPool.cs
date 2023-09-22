@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeConnections;
 
-public class PipeConnectionPool : IDisposable
+public class PipeConnectionPool
 {    
     private readonly ILogger _logger;
     private readonly Meter _meter;
@@ -63,7 +63,7 @@ public class PipeConnectionPool : IDisposable
         return useResult;
 
         PipeConnectionGroup<PipeClientConnection> CreateNewConnectionPool(string name)
-{
+        {
             _logger.LogInformation("created connection pool {PoolName} of type {Type}", name, "client");
             return new(_logger, name, Instances, CreateNewConnection, ConnectionRetryTimeout, ConnectionRetryTimeout);
         }
@@ -88,6 +88,8 @@ public class PipeConnectionPool : IDisposable
         async Task UseConnection(NamedPipeServerStream stream)
         {
             var completed = await activityFunc.Invoke(stream);
+            //if server message handler indicate that message handling completed - we stop this connection
+            //this will happen when client disconnects 
             if (completed)
                 connection.Disconnect($"connection interaction completed");
         }
@@ -200,7 +202,7 @@ public class PipeConnectionPool : IDisposable
     public void StopServerConnections()
         => Stop(_connectionsServer, "server");
         
-    public void Dispose()
+    public void StopConnectionExpiryCheck()
     {
         _expiryTimer?.Dispose();
         _expiryTimer = null;

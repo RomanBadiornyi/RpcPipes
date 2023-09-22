@@ -31,7 +31,7 @@ public class PipeConnectionPoolTests
     {
         _connectionPool?.StopClientConnections();
         _connectionPool?.StopServerConnections();
-        _connectionPool?.Dispose();
+        _connectionPool?.StopConnectionExpiryCheck();
     }
 
     [Test]
@@ -56,7 +56,7 @@ public class PipeConnectionPoolTests
 
         _connectionPool.StopClientConnections();
         _connectionPool.StopServerConnections();
-        _connectionPool.Dispose();
+        _connectionPool.StopConnectionExpiryCheck();
 
         Assert.That(receivedBuffer[5], Is.EqualTo(5));
         Assert.That(_connectionPool.ConnectionsClient.Where(c => c != null && c.VerifyIfConnected()).ToList(), Has.Count.EqualTo(0));
@@ -108,12 +108,12 @@ public class PipeConnectionPoolTests
         {
             var readWriteTasks = new List<Task>();
             //use wait handles to ensure that on each iteration all 3 connections from pool will be active
-            var readWriteStartHandle = new ManualResetEventSlim(false);
-            var readWriteTaskHandles = new List<ManualResetEventSlim>();
+            var readWriteStartHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
+            var readWriteTaskHandles = new List<WaitHandle>();
 
             for (var j = 0; j < _connectionPool.Instances; j++)
             {
-                var readWriteHandle = new ManualResetEventSlim(false);
+                var readWriteHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
                 readWriteTaskHandles.Add(readWriteHandle);
 
                 var readWriteTask = Task.Run(() => {
@@ -121,19 +121,20 @@ public class PipeConnectionPoolTests
                         connections.AddOrUpdate(stream, 1, (_, c) => c + 1);
                         await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
                         readWriteHandle.Set();
-                        readWriteStartHandle.Wait(TimeSpan.FromSeconds(5));
+                        readWriteStartHandle.WaitOne(TimeSpan.FromSeconds(5));
                         return false;
                     }).AsTask();
+
                     var receivedBuffer = new byte[10];
                     var clientTask = _connectionPool.UseClientConnection("PipeConnectionPoolTests", null, async stream => {
                         await stream.ReadAsync(receivedBuffer, 0, 5, _cancellationSource.Token);
-                        var _ = readWriteStartHandle.Wait(TimeSpan.FromSeconds(5));
+                        var _ = readWriteStartHandle.WaitOne(TimeSpan.FromSeconds(5));
                     }).AsTask();
                     return Task.WhenAll(serverTask, clientTask);
                 });
                 readWriteTasks.Add(readWriteTask);
             }
-            WaitHandle.WaitAll(readWriteTaskHandles.Select(h => h.WaitHandle).ToArray(), TimeSpan.FromSeconds(5));
+            WaitHandle.WaitAll(readWriteTaskHandles.ToArray(), TimeSpan.FromSeconds(5));
             readWriteStartHandle.Set();
             await Task.WhenAll(readWriteTasks);
         }
@@ -262,7 +263,7 @@ public class PipeConnectionPoolTests
         testTimeout.Cancel();
         _connectionPool.StopClientConnections();
         _connectionPool.StopServerConnections();
-        _connectionPool.Dispose();
+        _connectionPool.StopConnectionExpiryCheck();
         await Task.WhenAll(clientTasks.Concat(serverTasks));
     }
 
