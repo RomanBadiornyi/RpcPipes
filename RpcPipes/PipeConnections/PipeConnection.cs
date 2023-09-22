@@ -65,7 +65,9 @@ public abstract class PipeConnection<T> : IPipeConnection
                     return (VerifyIfConnected(), true, error);
                 }
             }
-            //connection could be dropped on invocation, in that case simply retry invocation
+            //client doesn't know when server drops connection and only when attempting to read/write - will get IOException
+            //with information that pipe is broken
+            //in this case simply reconnect and do one retry
             catch (PipeNetworkException e) when (VerifyIfConnected() == false && retries < maxRetries && shouldDispatch)
             {
                 Disconnect($"connection interrupted error: {e.Message}");

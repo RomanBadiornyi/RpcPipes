@@ -11,10 +11,10 @@ internal abstract class PipeHeartbeatOutHandler : IPipeMessageSender<PipeClientH
 {
     public abstract Task ClientTask { get; }
     public abstract ValueTask Publish(PipeClientHeartbeatMessage message);
-    
+
     public abstract string TargetPipe(PipeClientHeartbeatMessage message);
-    public abstract Task HandleMessage(PipeClientHeartbeatMessage message, PipeProtocol protocol, CancellationToken cancellation);    
-    public abstract ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error, CancellationToken cancellation);    
+    public abstract Task HandleMessage(PipeClientHeartbeatMessage message, PipeProtocol protocol, CancellationToken cancellation);
+    public abstract ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error, CancellationToken cancellation);
 }
 
 internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
@@ -25,19 +25,19 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
     private readonly IPipeMessageWriter _messageWriter;
     private readonly IPipeHeartbeatReceiver<TP> _heartbeatReceiver;
     private readonly Channel<PipeClientHeartbeatMessage> _heartBeatsChannel;
-    
+
     public override Task ClientTask { get; }
 
     public PipeHeartbeatOutHandler(
-        ILogger logger, 
-        string pipe, 
-        PipeMessageDispatcher connectionPool, 
-        IPipeHeartbeatReceiver<TP> heartbeatReceiver, 
+        ILogger logger,
+        string pipe,
+        PipeMessageDispatcher connectionPool,
+        IPipeHeartbeatReceiver<TP> heartbeatReceiver,
         IPipeMessageWriter messageWriter)
     {
         _logger = logger;
         _pipe = pipe;
-        _messageWriter = messageWriter;        
+        _messageWriter = messageWriter;
         _heartbeatReceiver = heartbeatReceiver;
         _heartBeatsChannel = Channel.CreateUnbounded<PipeClientHeartbeatMessage>();
         ClientTask = connectionPool.ProcessClientMessages(_heartBeatsChannel, this);
@@ -54,8 +54,8 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
     public override async Task HandleMessage(PipeClientHeartbeatMessage message, PipeProtocol protocol, CancellationToken cancellation)
     {
         if (cancellation.IsCancellationRequested || message.RequestCompleted)
-            return;        
-            
+            return;
+
         if (!await ReadyForHeartbeat(message, cancellation))
         {
             await TryRedoHeartbeat(message, cancellation);
@@ -71,16 +71,26 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         {
             message.HeartbeatCheckHandle.Release();
             message.HeartbeatCheckTime = DateTime.Now;
+            message.HeartbeatErrors = 0;
             await TryRedoHeartbeat(message, cancellation);
         }
     }
 
     public override async ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error, CancellationToken cancellation)
     {
-        if (!await ReadyForHeartbeat(message, cancellation))
+        message.HeartbeatErrors++;
+        if (message.HeartbeatErrors > 10)
         {
-            await TryRedoHeartbeat(message, cancellation);
-            return;
+            _logger.LogWarning("cancelling execution of request message {MessageId} due to heartbeat failure", message.Id);
+            message.HeartbeatCancellation.Cancel();
+        }
+        else
+        {
+            if (!await ReadyForHeartbeat(message, cancellation))
+            {
+                await TryRedoHeartbeat(message, cancellation);
+                return;
+            }
         }
     }
 
@@ -95,18 +105,18 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
                 await Task.Delay(heartbeatMessage.HeartbeatCheckFrequency - lastCheckInterval, cancellation);
             }
             catch (OperationCanceledException)
-            {                
+            {
                 return false;
-            }            
+            }
             return false;
         }
         return true;
     }
 
     private async Task TryRedoHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, CancellationToken cancellation)
-    {        
+    {
         if (!heartbeatMessage.RequestCompleted && !cancellation.IsCancellationRequested)
-            await Publish(heartbeatMessage);            
+            await Publish(heartbeatMessage);
     }
 
     private async Task DoHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, PipeProtocol protocol, CancellationToken cancellation)
@@ -133,14 +143,14 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
             else
             {
                 _logger.LogWarning("cancelling execution of request message {MessageId} as it's not handled by the server", heartbeatMessage.Id);
-                heartbeatMessage.HeartbeatCancellation.Cancel();            
+                heartbeatMessage.HeartbeatCancellation.Cancel();
             }
-        }        
+        }
 
         Task WriteHeartbeat(Stream stream, CancellationToken c)
             => _messageWriter.WriteData(pipeHeartbeatRequest, stream, c);
 
         ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken c)
             => _messageWriter.ReadData<TP>(stream, c);
-    }    
+    }
 }

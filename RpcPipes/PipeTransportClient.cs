@@ -100,6 +100,8 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken requestCancellation)
     {
+        requestCancellation.ThrowIfCancellationRequested();
+        
         var requestTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var heartbeatSync = new SemaphoreSlim(1);
