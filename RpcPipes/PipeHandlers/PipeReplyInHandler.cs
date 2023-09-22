@@ -28,7 +28,7 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
         ServerTask = connectionPool.ProcessServerMessages(this);
     }
 
-    public async Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
+    public async Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
         PipeClientRequestMessage requestMessage = null;
         var header = await protocol
@@ -44,7 +44,9 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
             {
                 requestMessage.HeartbeatCheckHandle.Release();
             }            
+            return false;
         }
+        return true;
     }
 
     private PipeClientRequestMessage TryMarkMessageAsCompleted(Guid id, PipeRequestHandler requestHandler)

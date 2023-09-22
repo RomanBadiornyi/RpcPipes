@@ -14,7 +14,7 @@ internal abstract class PipeHeartbeatOutHandler : IPipeMessageSender<PipeClientH
     
     public abstract string TargetPipe(PipeClientHeartbeatMessage message);
     public abstract Task HandleMessage(PipeClientHeartbeatMessage message, PipeProtocol protocol, CancellationToken cancellation);    
-    public abstract ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error);    
+    public abstract ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error, CancellationToken cancellation);    
 }
 
 internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
@@ -75,8 +75,15 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         }
     }
 
-    public override async ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error)
-        => await TryRedoHeartbeat(message, CancellationToken.None);
+    public override async ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error, CancellationToken cancellation)
+    {
+        if (!await ReadyForHeartbeat(message, cancellation))
+        {
+            await TryRedoHeartbeat(message, cancellation);
+            return;
+        }
+    }
+
 
     private static async Task<bool> ReadyForHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, CancellationToken cancellation)
     {

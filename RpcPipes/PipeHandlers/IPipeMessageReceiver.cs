@@ -6,5 +6,5 @@ public interface IPipeMessageReceiver
 {
     string Pipe { get; }
     Task ServerTask { get; }
-    Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation);
+    Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation);
 }

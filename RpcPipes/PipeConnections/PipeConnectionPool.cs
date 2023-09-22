@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace RpcPipes.PipeConnections;
 
-public class PipeConnectionPool : IAsyncDisposable
+public class PipeConnectionPool : IDisposable
 {    
     private readonly ILogger _logger;
     private readonly Meter _meter;
@@ -75,14 +75,22 @@ public class PipeConnectionPool : IAsyncDisposable
     public async ValueTask<(bool Connected, bool Dispatched, Exception Error)> UseServerConnection(
         string pipeName,
         Func<IPipeConnection, bool> activityPredicateFunc,
-        Func<NamedPipeServerStream, Task> activityFunc)
+        Func<NamedPipeServerStream, Task<bool>> activityFunc)
     {
         var (connection, connectionPool, error) = await Get(_connectionsServer, pipeName, CreateNewConnectionPool);
         if (error != null)
             return (false, false, error);
-        var useResult = await connection.UseConnection(activityFunc, activityPredicateFunc, _cancellation);
+
+        var useResult = await connection.UseConnection(UseConnection, activityPredicateFunc, _cancellation);
         Put(_connectionsServer, connectionPool, connection, useResult);
         return useResult;
+
+        async Task UseConnection(NamedPipeServerStream stream)
+        {
+            var completed = await activityFunc.Invoke(stream);
+            if (completed)
+                connection.Disconnect($"connection interaction completed");
+        }
 
         PipeConnectionGroup<PipeServerConnection> CreateNewConnectionPool(string name)
         {
@@ -176,12 +184,25 @@ public class PipeConnectionPool : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    private void Stop<T>(ConcurrentDictionary<string, PipeConnectionGroup<T>> connections, string type)
+        where T: IPipeConnection
+    {
+        foreach(var connectionPool in connections.Values)
+        {       
+            connectionPool.DisableConnections(_ => true, "stopped");
+            connections.TryRemove(connectionPool.Name, out _);            
+        }
+    }
+
+    public void StopClientConnections()
+        => Stop(_connectionsClient, "client");
+
+    public void StopServerConnections()
+        => Stop(_connectionsServer, "server");
+        
+    public void Dispose()
     {
         _expiryTimer?.Dispose();
         _expiryTimer = null;
-        Release(_connectionsClient, _ => true, "client", "disposed");
-        Release(_connectionsServer, _ => true, "server", "disposed");
-        await Task.CompletedTask;
     }
 }

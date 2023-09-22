@@ -41,8 +41,6 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     private readonly IPipeMessageWriter _messageWriter;
 
-    private readonly Task _connectionsTasks;
-
     private readonly ConcurrentDictionary<Guid, PipeClientRequestMessage> _requestQueue = new();
 
     internal PipeHeartbeatOutHandler HeartbeatOut { get; }
@@ -87,15 +85,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
         HeartbeatOut = new PipeHeartbeatOutHandler<TP>(logger, heartBeatPipe, MessageDispatcher, heartbeatReceiver, _messageWriter);
         RequestOut = new PipeRequestOutHandler(logger, sendPipe, MessageDispatcher, this);
-        ReplyIn = new PipeReplyInHandler(logger, receivePipe, MessageDispatcher, this);
-
-        _connectionsTasks = Task
-            //first complete all server connections
-            .WhenAll(ReplyIn.ServerTask)
-            //wait until we complete all client connections
-            .ContinueWith(_ => RequestOut.ClientTask, CancellationToken.None).Unwrap()
-            .ContinueWith(_ => HeartbeatOut.ClientTask, CancellationToken.None).Unwrap()
-            .ContinueWith(_ => ConnectionPool.DisposeAsync().AsTask()).Unwrap();                
+        ReplyIn = new PipeReplyInHandler(logger, receivePipe, MessageDispatcher, this);       
     }
 
     internal override PipeClientRequestMessage GetRequestMessageById(Guid id)
@@ -205,15 +195,21 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     public void Dispose()
     {
-        Cancellation.Cancel();
-        _connectionsTasks.Wait();
+        DisposeAsync().AsTask().Wait();
         _logger.LogDebug("client has been disposed");
     }
 
     public async ValueTask DisposeAsync()
     {
         Cancellation.Cancel();
-        await _connectionsTasks;
+        ConnectionPool.Dispose();
+
+        await Task.WhenAll(RequestOut.ClientTask, HeartbeatOut.ClientTask);        
+        ConnectionPool.StopClientConnections();
+        
+        await ReplyIn.ServerTask;
+        ConnectionPool.StopServerConnections();
+
         _logger.LogDebug("client has been disposed");        
     }
 }

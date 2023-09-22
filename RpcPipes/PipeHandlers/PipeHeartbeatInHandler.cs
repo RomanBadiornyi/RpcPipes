@@ -10,7 +10,7 @@ internal abstract class PipeHeartbeatInHandler : IPipeMessageReceiver
     public abstract string Pipe { get; }
     public abstract Task ServerTask { get; }
     
-    public abstract Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation);
+    public abstract Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation);
 }
 
 internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
@@ -37,11 +37,11 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
         ServerTask = connectionPool.ProcessServerMessages(this);
     }
 
-    public override async Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
+    public override async Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
         TP pipeHeartbeat;
-        var (pipeHeartbeatRequest, _) = await protocol.ReceiveMessage(ReadHeartbeat, cancellation);
-        if (pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
+        var (pipeHeartbeatRequest, pipeHeartbeatRequestReceived) = await protocol.ReceiveMessage(ReadHeartbeat, cancellation);
+        if (pipeHeartbeatRequestReceived && pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
         {
             pipeHeartbeat = _heartbeatHandler.HeartbeatMessage(pipeHeartbeatRequest.Id);
             if (_heartbeatHandler.TryGetMessageCancellation(pipeHeartbeatRequest.Id, out var requestCancellation))
@@ -66,7 +66,9 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
             }
             var heartbeatHeader = new PipeMessageHeader { MessageId = pipeHeartbeatRequest.Id };
             await protocol.TransferMessage(heartbeatHeader, WriteHeartbeat, cancellation);
+            return false;
         }
+        return true;
 
         ValueTask<PipeRequestHeartbeat> ReadHeartbeat(Stream stream, CancellationToken c)
             => _messageWriter.ReadData<PipeRequestHeartbeat>(stream, c);

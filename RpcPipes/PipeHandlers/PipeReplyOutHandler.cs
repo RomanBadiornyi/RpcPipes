@@ -49,9 +49,9 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
         ReplyMessagesCounter.Add(-1);
     }
 
-    public async ValueTask HandleError(PipeServerRequestMessage message, Exception error)
+    public async ValueTask HandleError(PipeServerRequestMessage message, Exception error, CancellationToken cancellation)
     {
-        if (error is PipeDataException)
+        if (error is PipeDataException || cancellation.IsCancellationRequested)
             await ReportErrorOrComplete(message, error);            
         else 
             await RetryOrComplete(message, error);

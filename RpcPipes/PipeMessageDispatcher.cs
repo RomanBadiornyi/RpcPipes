@@ -76,10 +76,10 @@ public class PipeMessageDispatcher
             return true;
         }
 
-        async Task DispatchMessage(NamedPipeServerStream stream)
+        async Task<bool> DispatchMessage(NamedPipeServerStream stream)
         {
             var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
-            await messageReceiver.ReceiveMessage(protocol, _cancellation);
+            return await messageReceiver.ReceiveMessage(protocol, _cancellation);
         }     
     }
 
@@ -95,8 +95,17 @@ public class PipeMessageDispatcher
             //so to prevent message from being stalled in case if we see connection not yet established (see ValidateConnection callback)
             //we push message back into messagesQueue allowing other dispatchers to read same message and then we will bypass dispatching of this item
             //in this case at some point message will be picked by connection which is ready to serve this message and will eventually dispatch it
-            var item = await messagesQueue.Reader.ReadAsync(_cancellation);
-            var pipeName = messageSender.TargetPipe(item);
+            T item;
+            string pipeName;
+            try
+            {
+                item = await messagesQueue.Reader.ReadAsync(_cancellation);
+                pipeName = messageSender.TargetPipe(item);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
 
             var (connected, dispatched, error) = await _connectionPool.UseClientConnection(pipeName, ShouldDispatchMessage, DispatchMessage);            
             //if some unexpected error - log, otherwise Cancelled or Network error while connection disconnected - considered normal cases 
@@ -117,7 +126,7 @@ public class PipeMessageDispatcher
 
             //if message was not dispatched - report error to handler and let it handle that            
             if (!dispatched && error != null && error is not OperationCanceledException)
-                await messageSender.HandleError(item, error);
+                await messageSender.HandleError(item, error, _cancellation);
 
             bool ShouldDispatchMessage(IPipeConnection connection)
             {
@@ -131,7 +140,7 @@ public class PipeMessageDispatcher
             async Task DispatchMessage(NamedPipeClientStream stream)
             {
                 var protocol = new PipeProtocol(stream, HeaderBufferSize, BufferSize);
-                    await messageSender.HandleMessage(item, protocol, _cancellation);
+                await messageSender.HandleMessage(item, protocol, _cancellation);
             }
         }        
     }    

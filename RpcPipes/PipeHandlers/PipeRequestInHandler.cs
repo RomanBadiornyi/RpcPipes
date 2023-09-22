@@ -37,7 +37,7 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
         ServerTask = connectionPool.ProcessServerMessages(this);
     }
 
-    public async Task ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
+    public async Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
         PipeServerRequestMessage requestMessage = null;
         var header = await protocol
@@ -58,7 +58,9 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
                 PendingMessagesCounter.Add(1);
                 ThreadPool.QueueUserWorkItem(ExecuteRequest, requestMessage);
             }
+            return false;
         }
+        return true;
     }
 
     private void ExecuteRequest(object state)

@@ -11,5 +11,5 @@ public interface IPipeMessageSender<T>
 
     string TargetPipe(T message);    
     Task HandleMessage(T message, PipeProtocol protocol, CancellationToken cancellation);
-    ValueTask HandleError(T message, Exception error);
+    ValueTask HandleError(T message, Exception error, CancellationToken cancellation);
 }

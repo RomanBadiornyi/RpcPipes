@@ -60,7 +60,7 @@ public abstract class PipeConnection<T> : IPipeConnection
                 if  (connected && shouldDispatch)
                 {
                     LastUsedAt = DateTime.UtcNow;
-                    await useFunc.Invoke(Connection);
+                    await useFunc.Invoke(Connection);                    
                     LastUsedAt = DateTime.UtcNow;
                     return (VerifyIfConnected(), true, error);
                 }
