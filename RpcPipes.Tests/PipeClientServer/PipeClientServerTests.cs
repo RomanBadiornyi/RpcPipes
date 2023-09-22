@@ -222,11 +222,11 @@ public class PipeClientServerTests : BasePipeClientServerTests
     public async Task RequestReply_AllConnectedOnMessageSendAndDisconnectedOnDispose()
     {
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
-        var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 4, Serializer);
+        var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
         await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
-            ClientLogger, "rpc.pipe", clientId, 4, HeartbeatMessageReceiver, Serializer))
+            ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
             pipeClient.ConnectionPool.ConnectionExpiryTimeout = TimeSpan.FromSeconds(600);
@@ -246,17 +246,17 @@ public class PipeClientServerTests : BasePipeClientServerTests
             _ = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
             Assert.Multiple(() =>
             {
-                //4 connections to accept response from server
-                Assert.That(Connections["PipeTransportClient.server-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(4),
+                //1 connections to accept response from server
+                Assert.That(Connections["PipeTransportClient.server-connections"], Is.EqualTo(1),
                     "incorrect server connections on client");
-                //4 connections to send requests (4 for client requests and 4 for heartbeat requests)
-                Assert.That(Connections["PipeTransportClient.client-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(8),
+                //1 for client requests and 1 for heartbeat requests
+                Assert.That(Connections["PipeTransportClient.client-connections"], Is.EqualTo(2),
                     "incorrect client connections on client");
-                //8 connections to accept requests from client (4 for requests and 4 for heartbeat)
-                Assert.That(Connections["PipeTransportServer.server-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(8),
+                //1 connections to accept requests from client and 1 to receive heartbeat
+                Assert.That(Connections["PipeTransportServer.server-connections"], Is.EqualTo(2),
                     "incorrect server connections on server");
-                //4 client connections to send reply back to client
-                Assert.That(Connections["PipeTransportServer.client-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(4),
+                //1 client connections to send reply back to client
+                Assert.That(Connections["PipeTransportServer.client-connections"], Is.EqualTo(1),
                     "incorrect server connections on server");
             });
         }
@@ -265,10 +265,11 @@ public class PipeClientServerTests : BasePipeClientServerTests
             "incorrect server connections on client");
         Assert.That(Connections["PipeTransportClient.client-connections"], Is.EqualTo(0),
             "incorrect client connections on client");
-        Assert.That(Connections["PipeTransportServer.server-connections"], Is.GreaterThanOrEqualTo(0).And.LessThanOrEqualTo(8),
-            "incorrect server connections on server");
+
+        Assert.That(Connections["PipeTransportServer.server-connections"], Is.EqualTo(0),
+            "incorrect server connections on server");        
         //at this point client connections will still be active as it does not receive disconnect signal and we didn't dispose server
-        Assert.That(Connections["PipeTransportServer.client-connections"], Is.GreaterThanOrEqualTo(1).And.LessThanOrEqualTo(4),
+        Assert.That(Connections["PipeTransportServer.client-connections"], Is.EqualTo(1),
             "incorrect server connections on server");
 
         ServerStop.Cancel();        
