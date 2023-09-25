@@ -26,7 +26,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
     public readonly string _pipe;
     private readonly IPipeMessageWriter _messageWriter;
     private readonly IPipeHeartbeatReceiver<TP> _heartbeatReceiver;
-    private readonly Channel<PipeClientHeartbeatMessage> _heartBeatsChannel;
+    private readonly Channel<PipeClientHeartbeatMessage> _heartbeatsChannel;
     private readonly ConcurrentStack<PipeClientHeartbeatMessage> _heartbeatsPaused;
     private readonly Timer _heartbeatResumer;
     private readonly TimeSpan _heartbeatsPauseInterval;
@@ -44,13 +44,13 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         _pipe = pipe;
         _messageWriter = messageWriter;
         _heartbeatReceiver = heartbeatReceiver;
-        _heartBeatsChannel = Channel.CreateUnbounded<PipeClientHeartbeatMessage>();
+        _heartbeatsChannel = Channel.CreateUnbounded<PipeClientHeartbeatMessage>();
 
         _heartbeatsPauseInterval = TimeSpan.FromMilliseconds(100);
         _heartbeatsPaused = new ConcurrentStack<PipeClientHeartbeatMessage>();
         _heartbeatResumer = new Timer(_ => ResumeHeartbeat(), this, 0, (int)_heartbeatsPauseInterval.TotalMilliseconds);
 
-        ClientTask = Task.WhenAll(connectionPool.ProcessClientMessages(_heartBeatsChannel, this))
+        ClientTask = Task.WhenAll(connectionPool.ProcessClientMessages(_heartbeatsChannel, this))
             .ContinueWith(_ =>
             {
                 _heartbeatResumer.Dispose();
@@ -77,7 +77,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
                         _heartbeatsPaused.Push(message);
                     }
                     else
-                        _heartBeatsChannel.Writer.TryWrite(message);
+                        _heartbeatsChannel.Writer.TryWrite(message);
 
                     //check if next item in stack not available or equal to original head - exit,
                     //so rest will be verified during next time iteration
@@ -113,7 +113,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
 
     public override async ValueTask Publish(PipeClientHeartbeatMessage message)
     {
-        await _heartBeatsChannel.Writer.WriteAsync(message);
+        await _heartbeatsChannel.Writer.WriteAsync(message);
     }
 
     public override string TargetPipe(PipeClientHeartbeatMessage message)

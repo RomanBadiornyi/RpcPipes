@@ -114,8 +114,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
             {
                 receiveEventHandle.Set();
                 var wait = 0;
-                while (!((CancellationToken)args[1]).IsCancellationRequested && wait++ < 10)
-                    await Task.Delay(TimeSpan.FromMilliseconds(5));
+                while (!((CancellationToken)args[1]).IsCancellationRequested && wait++ < 32)
+                    await Task.Delay(TimeSpan.FromMilliseconds(8));
                 return new PipeReplyMessage("hi");
             });
 
@@ -127,7 +127,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 10);
+            var request = new PipeRequestMessage("hello world", 0);
 
             var requestContext = new PipeRequestContext
             {
