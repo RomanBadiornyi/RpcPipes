@@ -28,8 +28,8 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
     private readonly IPipeHeartbeatReceiver<TP> _heartbeatReceiver;
     private readonly Channel<PipeClientHeartbeatMessage> _heartBeatsChannel;
     private readonly ConcurrentStack<PipeClientHeartbeatMessage> _heartbeatsPaused;
-    private readonly TimeSpan _heartbeatsPauseInterval;
     private readonly Timer _heartbeatResumer;
+    private readonly TimeSpan _heartbeatsPauseInterval;
 
     public override Task ClientTask { get; }
 
@@ -45,9 +45,11 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         _messageWriter = messageWriter;
         _heartbeatReceiver = heartbeatReceiver;
         _heartBeatsChannel = Channel.CreateUnbounded<PipeClientHeartbeatMessage>();
-        _heartbeatsPaused = new ConcurrentStack<PipeClientHeartbeatMessage>();
+
         _heartbeatsPauseInterval = TimeSpan.FromMilliseconds(100);
+        _heartbeatsPaused = new ConcurrentStack<PipeClientHeartbeatMessage>();
         _heartbeatResumer = new Timer(_ => ResumeHeartbeat(), this, 0, (int)_heartbeatsPauseInterval.TotalMilliseconds);
+
         ClientTask = Task.WhenAll(connectionPool.ProcessClientMessages(_heartBeatsChannel, this))
             .ContinueWith(_ =>
             {
@@ -58,30 +60,53 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
 
     private void ResumeHeartbeat()
     {
-        if (_heartbeatsPaused.TryPop(out var head))
+        while (true)
         {
-            var message = head;
-            var verified = false;
-            while (!verified)
+            if (_heartbeatsPaused.TryPop(out var head))
             {
-                if (!ShouldDoHeartbeat(message))
-                    _heartbeatsPaused.Push(message);
-                else
-                    _heartBeatsChannel.Writer.TryWrite(message);
+                var message = head;
 
-                //check if next item in stack not available or equal to original head - exit, 
-                //so rest will be verified during next time iteration
-                if (_heartbeatsPaused.TryPeek(out message))
+                var itemsVerified = false;
+                var itemMinWaitTime = _heartbeatsPauseInterval.TotalMilliseconds + 1;
+
+                while (!itemsVerified)
                 {
-                    if (message == head)
-                        verified = true;
+                    if (!ShouldDoHeartbeat(message, out var delay))
+                    {
+                        itemMinWaitTime = Math.Min(itemMinWaitTime, delay.TotalMilliseconds);
+                        _heartbeatsPaused.Push(message);
+                    }
                     else
-                        verified = !_heartbeatsPaused.TryPop(out message);
+                        _heartBeatsChannel.Writer.TryWrite(message);
+
+                    //check if next item in stack not available or equal to original head - exit,
+                    //so rest will be verified during next time iteration
+                    if (_heartbeatsPaused.TryPeek(out message))
+                    {
+                        if (message == head)
+                            itemsVerified = true;
+                        else
+                            itemsVerified = !_heartbeatsPaused.TryPop(out message);
+                    }
+                    else
+                    {
+                        itemsVerified = true;
+                    }
+                }
+                //repeat check if there are items with wait time less than check interval
+                //so that we check heartbeat for paused messages on time
+                if (TimeSpan.FromMilliseconds(itemMinWaitTime) < _heartbeatsPauseInterval)
+                {
+                    continue;
                 }
                 else
                 {
-                    verified = true;
+                    break;
                 }
+            }
+            else
+            {
+                break;
             }
         }
     }
@@ -99,7 +124,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         if (cancellation.IsCancellationRequested || message.RequestCompleted)
             return;
 
-        if (!ShouldDoHeartbeat(message))
+        if (!ShouldDoHeartbeat(message, out _))
         {
             _heartbeatsPaused.Push(message);
             return;
@@ -128,7 +153,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         }
         else
         {
-            if (!ShouldDoHeartbeat(message))
+            if (!ShouldDoHeartbeat(message, out _))
             {
                 _heartbeatsPaused.Push(message);
                 return;
@@ -178,9 +203,10 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
             => _messageWriter.ReadData<TP>(stream, c);
     }
 
-    private bool ShouldDoHeartbeat(PipeClientHeartbeatMessage message)
+    private bool ShouldDoHeartbeat(PipeClientHeartbeatMessage message, out TimeSpan delay)
     {
-        if (DateTime.Now - message.HeartbeatCheckTime + _heartbeatsPauseInterval > message.HeartbeatCheckFrequency)
+        delay = DateTime.Now - message.HeartbeatCheckTime;
+        if (delay > message.HeartbeatCheckFrequency)
             return true;
         return false;
     }

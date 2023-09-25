@@ -17,7 +17,7 @@ public class BasePipeClientServerTests
 
     protected TimeSpan ClientRequestTimeout = TimeSpan.FromMinutes(20);
     protected TimeSpan ServerTimeout = TimeSpan.FromMinutes(15);
-        
+
     protected Dictionary<string, int> Messages;
     protected Dictionary<string, int> Connections;
     protected MeterListener MeterListener;
@@ -26,19 +26,19 @@ public class BasePipeClientServerTests
     protected Task ServerTask;
 
     protected ILogger TestsLogger;
-    protected ILogger<PipeTransportServer> ServerLogger;    
+    protected ILogger<PipeTransportServer> ServerLogger;
     protected ILogger<PipeTransportClient<PipeHeartbeatMessage>> ClientLogger;
 
     protected PipeSerializer Serializer;
     protected PipeMessageHandler MessageHandler;
     protected PipeHeartbeatMessageHandler HeartbeatHandler;
     protected ConcurrentBag<PipeHeartbeatMessage> HeartbeatReplies;
-    protected PipeHeartbeatReceiver HeartbeatMessageReceiver;    
+    protected PipeHeartbeatReceiver HeartbeatMessageReceiver;
 
     [OneTimeSetUp]
     public void SetupTimeouts()
     {
-        //if we are not debugging tests - ensure that they don't hang due to deadlocks and enforce client/server to be cancelled after timeout 
+        //if we are not debugging tests - ensure that they don't hang due to deadlocks and enforce client/server to be cancelled after timeout
         if (!Debugger.IsAttached)
         {
             ClientRequestTimeout = TimeSpan.FromSeconds(60);
@@ -61,38 +61,38 @@ public class BasePipeClientServerTests
             }
         };
         MeterListener.SetMeasurementEventCallback<int>(OnMeasurementRecorded);
-        MeterListener.Start();        
+        MeterListener.Start();
 
         void OnMeasurementRecorded(Instrument instrument, int measurement, ReadOnlySpan<KeyValuePair<string, object>> tags, object state)
         {
-            lock(Messages) 
+            lock(Messages)
             {
                 var id = $"{instrument.Name}";
                 if (Messages.TryGetValue(id, out var current))
                 {
-                    var next = current + measurement;                    
+                    var next = current + measurement;
                     Messages[id] = next;
                     TestsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
-                }                
+                }
             }
-            lock(Connections) 
+            lock(Connections)
             {
                 var id = $"{instrument.Meter.Name}.{instrument.Name}";
                 if (Connections.TryGetValue(id, out var current))
                 {
-                    var next = current + measurement;                    
+                    var next = current + measurement;
                     Connections[id] = next;
                     TestsLogger?.LogTrace("metrics {MetricsName} change {From} to {To}", id, current, next);
                 }
-            }            
+            }
         }
-    }    
+    }
 
     [SetUp]
     public void SetupLogging()
     {
         _serviceProvider = new ServiceCollection()
-            .AddLogging(loggingBuilder => 
+            .AddLogging(loggingBuilder =>
             {
                 loggingBuilder.SetMinimumLevel(LogLevel.Trace);
                 loggingBuilder.AddNUnitLogger();
@@ -100,12 +100,12 @@ public class BasePipeClientServerTests
         ClientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeHeartbeatMessage>>>();
         ServerLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
         TestsLogger = _serviceProvider.GetRequiredService<ILogger<BasePipeClientServerTests>>();
-        TestsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");        
+        TestsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");
     }
 
     [TearDown]
     public void CleanupLogging()
-    {                        
+    {
         _serviceProvider.Dispose();
         TestsLogger.LogInformation($"=== end   {TestContext.CurrentContext.Test.Name} ===");
     }
@@ -119,14 +119,14 @@ public class BasePipeClientServerTests
         HeartbeatHandler = new PipeHeartbeatMessageHandler();
 
         HeartbeatReplies = new ConcurrentBag<PipeHeartbeatMessage>();
-        HeartbeatMessageReceiver = new PipeHeartbeatReceiver(HeartbeatReplies);        
+        HeartbeatMessageReceiver = new PipeHeartbeatReceiver(HeartbeatReplies);
     }
 
     [TearDown]
     public void CleanupDependencies()
     {
         HeartbeatReplies.Clear();
-    }         
+    }
 
     [SetUp]
     public void StartMetrics()
@@ -138,7 +138,7 @@ public class BasePipeClientServerTests
 
             { "pending-messages", 0 },
             { "active-messages", 0 },
-            { "reply-messages", 0 },                        
+            { "reply-messages", 0 },
             { "handled-messages", 0 }
         };
         Connections = new Dictionary<string, int>
@@ -152,24 +152,24 @@ public class BasePipeClientServerTests
 
     [TearDown]
     public void CleanupMetrics()
-    {        
+    {
         Messages.Clear();
         Connections.Clear();
     }
 
     [SetUp]
-    public void SetupServer()   
-    {        
+    public void SetupServer()
+    {
         ServerStop = new CancellationTokenSource();
         ServerStop.CancelAfter(ServerTimeout);
         ServerTask = Task.CompletedTask;
-    }    
+    }
 
     [TearDown]
-    public void CleanupServer()   
+    public void CleanupServer()
     {
         if (!ServerStop.IsCancellationRequested)
-            ServerStop.Cancel();        
+            ServerStop.Cancel();
         ServerTask.Wait();
         ServerStop.Dispose();
     }
@@ -179,6 +179,6 @@ public class BasePipeClientServerTests
         client.Cancellation.CancelAfter(ClientRequestTimeout);
         client.ConnectionPool.ConnectionTimeout = TimeSpan.FromMilliseconds(5);
         client.ConnectionPool.ConnectionRetryTimeout = TimeSpan.FromMilliseconds(10);
-        client.ConnectionPool.ConnectionReleaseTimeout = TimeSpan.FromMilliseconds(10);            
+        client.ConnectionPool.ConnectionReleaseTimeout = TimeSpan.FromMilliseconds(10);
     }
 }

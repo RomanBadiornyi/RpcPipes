@@ -449,7 +449,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, serializer);
         ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
-
+        HeartbeatReplies.Clear();
         await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
