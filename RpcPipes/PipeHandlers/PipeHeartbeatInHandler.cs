@@ -44,14 +44,14 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
         if (pipeHeartbeatRequestReceived && pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
         {
             pipeHeartbeat = _heartbeatHandler.HeartbeatMessage(pipeHeartbeatRequest.Id);
-            if (_heartbeatHandler.TryGetMessageCancellation(pipeHeartbeatRequest.Id, out var requestCancellation))
+            if (_heartbeatHandler.TryGetMessageState(pipeHeartbeatRequest.Id, out var messageState))
             {
                 if (!pipeHeartbeatRequest.Active)
                 {
                     _logger.LogDebug("requested to cancel requests execution for message {MessageId}", pipeHeartbeatRequest.Id);
                     try
                     {
-                        requestCancellation.Cancel();
+                        messageState.Cancellation.Cancel();
                     }
                     catch (ObjectDisposedException)
                     {

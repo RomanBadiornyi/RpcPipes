@@ -13,7 +13,6 @@ internal class PipeServerRequestMessage : IPipeMessage
     public Func<CancellationTokenSource, Task> RunRequest { get; set; }    
     public Func<PipeProtocol, CancellationToken, Task> SendResponse { get; set; }
     public Func<Exception, ValueTask<bool>> ReportError { get; set; }
-    public Action<Exception, bool> OnMessageCompleted { get; set; }
 
     public PipeServerRequestMessage(Guid id, string pipe)
     {

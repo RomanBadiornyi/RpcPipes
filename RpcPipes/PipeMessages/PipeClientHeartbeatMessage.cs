@@ -13,8 +13,6 @@ internal class PipeClientHeartbeatMessage : IPipeMessage
     public TimeSpan HeartbeatCheckFrequency { get; set; }
     public DateTime HeartbeatCheckTime { get; set; }
 
-    public int HeartbeatErrors { get; set; }
-
     public PipeClientHeartbeatMessage(Guid id)
     {
         Id = id;

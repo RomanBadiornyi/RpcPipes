@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using RpcPipes.PipeData;
+using RpcPipes.PipeExceptions;
 using RpcPipes.PipeHeartbeat;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
@@ -25,6 +27,8 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
     private readonly IPipeMessageWriter _messageWriter;
     private readonly IPipeHeartbeatReceiver<TP> _heartbeatReceiver;
     private readonly Channel<PipeClientHeartbeatMessage> _heartBeatsChannel;
+    private readonly ConcurrentStack<PipeClientHeartbeatMessage> _heartbeatsPaused;
+    private readonly Timer _heartbeatResumer;
 
     public override Task ClientTask { get; }
 
@@ -40,7 +44,42 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         _messageWriter = messageWriter;
         _heartbeatReceiver = heartbeatReceiver;
         _heartBeatsChannel = Channel.CreateUnbounded<PipeClientHeartbeatMessage>();
-        ClientTask = connectionPool.ProcessClientMessages(_heartBeatsChannel, this);
+        _heartbeatsPaused = new ConcurrentStack<PipeClientHeartbeatMessage>();
+        _heartbeatResumer = new Timer(_ => ResumeHeartbeat(), this, 0, 100);
+        ClientTask = Task.WhenAll(connectionPool.ProcessClientMessages(_heartBeatsChannel, this))
+            .ContinueWith(_ =>
+            {
+                _heartbeatResumer.Dispose();
+                _heartbeatsPaused.Clear();
+            });
+    }
+
+    private void ResumeHeartbeat()
+    {
+        if (_heartbeatsPaused.TryPop(out var head))
+        {
+            var message = head;
+            var verified = false;
+            while (!verified)
+            {
+                if (message.HeartbeatCheckFrequency <= (DateTime.Now - message.HeartbeatCheckTime))
+                    _heartBeatsChannel.Writer.TryWrite(message);
+                else
+                    _heartbeatsPaused.Push(message);
+                //check if next item in stack not available or equal to original head - exit, so rest will be verified during next time iteration
+                if (_heartbeatsPaused.TryPeek(out message))
+                {
+                    if (message == head)
+                        verified = true;
+                    else 
+                        verified = !_heartbeatsPaused.TryPop(out message);
+                }
+                else 
+                {
+                    verified = true;
+                }
+            }
+        }        
     }
 
     public override async ValueTask Publish(PipeClientHeartbeatMessage message)
@@ -56,11 +95,12 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         if (cancellation.IsCancellationRequested || message.RequestCompleted)
             return;
 
-        if (!await ReadyForHeartbeat(message, cancellation))
+        if (message.HeartbeatCheckFrequency > (DateTime.Now - message.HeartbeatCheckTime))
         {
-            await TryRedoHeartbeat(message, cancellation);
+            _heartbeatsPaused.Push(message);
             return;
         }
+
         await message.HeartbeatCheckHandle.WaitAsync(cancellation);
         try
         {
@@ -70,47 +110,27 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         finally
         {
             message.HeartbeatCheckHandle.Release();
-            message.HeartbeatCheckTime = DateTime.Now;
-            message.HeartbeatErrors = 0;
+            message.HeartbeatCheckTime = DateTime.Now;            
             await TryRedoHeartbeat(message, cancellation);
         }
     }
 
     public override async ValueTask HandleError(PipeClientHeartbeatMessage message, Exception error, CancellationToken cancellation)
-    {
-        message.HeartbeatErrors++;
-        if (message.HeartbeatErrors > 10)
+    {                
+        if (error is PipeConnectionsExhausted)
         {
             _logger.LogWarning("cancelling execution of request message {MessageId} due to heartbeat failure", message.Id);
             message.HeartbeatCancellation.Cancel();
         }
         else
         {
-            if (!await ReadyForHeartbeat(message, cancellation))
+            if (message.HeartbeatCheckFrequency > (DateTime.Now - message.HeartbeatCheckTime))
             {
-                await TryRedoHeartbeat(message, cancellation);
+                _heartbeatsPaused.Push(message);
                 return;
             }
+            await TryRedoHeartbeat(message, cancellation);
         }
-    }
-
-
-    private static async Task<bool> ReadyForHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, CancellationToken cancellation)
-    {
-        var lastCheckInterval = DateTime.Now - heartbeatMessage.HeartbeatCheckTime;
-        if (lastCheckInterval < heartbeatMessage.HeartbeatCheckFrequency)
-        {
-            try
-            {
-                await Task.Delay(heartbeatMessage.HeartbeatCheckFrequency - lastCheckInterval, cancellation);
-            }
-            catch (OperationCanceledException)
-            {
-                return false;
-            }
-            return false;
-        }
-        return true;
     }
 
     private async Task TryRedoHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, CancellationToken cancellation)

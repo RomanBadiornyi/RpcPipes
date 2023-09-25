@@ -72,10 +72,10 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
         {
             PendingMessagesCounter.Add(-1);
             ActiveMessagesCounter.Add(1);
-            _heartbeatHandler.TryGetMessageCancellation(requestMessage.Id, out var requestCancellation);
+            _heartbeatHandler.TryGetMessageState(requestMessage.Id, out var messageState);
             try
             {
-                await requestMessage.RunRequest.Invoke(requestCancellation);
+                await requestMessage.RunRequest.Invoke(messageState.Cancellation);
             }
             catch (OperationCanceledException)
             {

@@ -45,7 +45,6 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
         _logger.LogDebug("scheduled reply for message {MessageId}", message.Id);        
         await message.SendResponse.Invoke(protocol, cancellation);            
         _heartbeatHandler.EndMessageHandling(message.Id);
-        message.OnMessageCompleted.Invoke(null, true);        
         ReplyMessagesCounter.Add(-1);
     }
 
@@ -64,7 +63,6 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
         {
             //we did retry 3 times, if still no luck - drop message
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
-            requestMessage.OnMessageCompleted.Invoke(e, false);
             _logger.LogError(e, "unable to send message {MessageId} due to error '{ErrorMessage}'", requestMessage.Id, requestMessage.Id, e.Message);
         }
         else
@@ -82,7 +80,6 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
         {
             //this means that we were not able to send error back to client, in this case simply drop message
             _heartbeatHandler.EndMessageHandling(requestMessage.Id);
-            requestMessage.OnMessageCompleted.Invoke(e, false);
         }
     }    
 }

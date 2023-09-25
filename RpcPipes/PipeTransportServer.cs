@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
 using RpcPipes.PipeConnections;
@@ -69,7 +68,6 @@ public class PipeTransportServer
 
             _connectionsCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
 
-            var requests = new ConcurrentDictionary<Guid, PipeRequestResponse<TReq, TRep>>();
             var headerBuffer = 1 * 1024;
             var contentBuffer = 4 * 1024;
             ConnectionPool = new PipeConnectionPool(_logger, Meter, _instances, contentBuffer, _connectionsCancellation.Token);
@@ -93,13 +91,12 @@ public class PipeTransportServer
             return _connectionsTask;
 
             bool SetupRequestCallbacks(PipeServerRequestMessage request)
-                => SetupRequest(request, requests, messageHandler, heartbeatHandler);
+                => SetupRequest(request, messageHandler, heartbeatHandler);
         }
     }
 
     private bool SetupRequest<TReq, TRep>(
         PipeServerRequestMessage requestMessage, 
-        ConcurrentDictionary<Guid, PipeRequestResponse<TReq, TRep>> requests, 
         IPipeMessageHandler<TReq, TRep> messageHandler,
         IPipeHeartbeatHandler heartbeatHandler)
     {
@@ -109,15 +106,16 @@ public class PipeTransportServer
             RequestMessage = new PipeMessageRequest<TReq>(), 
             ResponseMessage = new PipeMessageResponse<TRep>() 
         };
-        if (requests.TryAdd(requestMessage.Id, requestContainer))
+        if (heartbeatHandler.TryGetMessageState(requestMessage.Id, out var messageState))
         {
+            messageState.RequestState = requestContainer;
+
             requestMessage.ReadRequest = (protocol, token) => ReadRequest(requestContainer, protocol, token);
             requestMessage.RunRequest = (cancellation) => RunRequest(messageHandler, heartbeatHandler, requestContainer, cancellation);
             requestMessage.SendResponse = (protocol, token) => SendRequest(requestContainer, protocol, token); 
             requestMessage.ReportError = (exception) => ReportError(requestContainer, exception); 
-            requestMessage.OnMessageCompleted = (exception, result) => requests.TryRemove(requestMessage.Id, out _);
             return true;            
-        }
+        }        
         return false;
     }
 

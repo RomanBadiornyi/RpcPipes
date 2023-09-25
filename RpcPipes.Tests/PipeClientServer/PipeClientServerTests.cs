@@ -6,6 +6,7 @@ using RpcPipes.Models.PipeSerializers;
 using RpcPipes.PipeData;
 using RpcPipes.PipeHeartbeat;
 using RpcPipes.Models.PipeHeartbeat;
+using RpcPipes.PipeExceptions;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
@@ -48,10 +49,10 @@ public class PipeClientServerTests : BasePipeClientServerTests
             SetupClient(pipeClient);
             var request = new PipeRequestMessage("hello world", 10);
             var requestContext = new PipeRequestContext();
-            var exception = Assert.ThrowsAsync<IndexOutOfRangeException>(() =>
+            var exception = Assert.ThrowsAsync<PipeConnectionsExhausted>(() =>
                 pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
             Assert.That(exception, Is.Not.Null);
-            Assert.That(exception.Message, Does.Contain("Run out of available"));
+            Assert.That(exception.Message, Does.Contain("run out of available connections"));
             Assert.That(exception.InnerException.Message, Does.Contain("timeout"));
         }
     }
@@ -69,7 +70,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             var requestContext = new PipeRequestContext { Deadline = TimeSpan.FromMilliseconds(10) };
             var cancellation = new CancellationTokenSource();
             cancellation.Cancel();
-            var exception = Assert.ThrowsAsync<OperationCanceledException>(() =>
+            var exception = Assert.ThrowsAsync<TaskCanceledException>(() =>
                 pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, cancellation.Token));
             Assert.That(exception, Is.Not.Null);
         }
@@ -148,8 +149,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         Assert.That(Messages["active-messages"], Is.EqualTo(0));
         Assert.That(Messages["handled-messages"], Is.EqualTo(1));
-
-        Assert.That(Messages["sent-messages"], Is.EqualTo(1));
+Assert.That(Messages["sent-messages"], Is.EqualTo(1));
         Assert.That(Messages["received-messages"], Is.EqualTo(1));
 
         ServerStop.Cancel();

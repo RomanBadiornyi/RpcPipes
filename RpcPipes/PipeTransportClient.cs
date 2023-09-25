@@ -100,7 +100,9 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken requestCancellation)
     {
-        requestCancellation.ThrowIfCancellationRequested();
+        //fail early if request is canalled
+        if (Cancellation.Token.IsCancellationRequested || requestCancellation.IsCancellationRequested)
+            throw new TaskCanceledException("Request cancelled due to cancellation of client");        
         
         var requestTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -113,12 +115,7 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         //cancel request if client got disposed.
         using var clientStopCancellation = CancellationTokenSource.CreateLinkedTokenSource(Cancellation.Token);
         clientStopCancellation.Token.Register(() =>
-            requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to cancellation of client")));
-
-        //once all cancellation token callbacks setup - verify if we are not already in cancelled state
-        //and if so - simply throw
-        if (Cancellation.IsCancellationRequested)
-            throw new TaskCanceledException("Request cancelled due to cancellation of client");
+            requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to cancellation of client")));        
 
         var requestMessage = new PipeClientRequestMessage(Guid.NewGuid())
         {

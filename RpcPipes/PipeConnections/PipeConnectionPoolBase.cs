@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeExceptions;
 
 namespace RpcPipes.PipeConnections;
 
@@ -39,7 +40,7 @@ public abstract class PipeConnectionPoolBase : IDisposable
         var connectionPool = connections.GetOrAdd(pipeName, poolCreateFunc);
         var (connection, errors) = await connectionPool.BorrowConnection(100);
         if (connection == null)
-            return (null, null, new IndexOutOfRangeException($"Run out of available connections on the pool {pipeName}", errors));
+            return (null, null, new PipeConnectionsExhausted(pipeName, connectionPool.Instances, errors));
         return (connection, connectionPool, null);
     }
 
@@ -87,8 +88,11 @@ public abstract class PipeConnectionPoolBase : IDisposable
                 connectionPool.IsUnusedPool(Settings.ConnectionDisposeTimeout.TotalMilliseconds))
             {
                 //if we disabled all connections and connection pool indicates that it's not in use - remove it from pools
-                connections.TryRemove(connectionPool.Name, out _);
-                _logger.LogInformation("connection pool {PoolName} of type {Type} cleaned up '{Reason}'", connectionPool.Name, type, reason);
+                if (connections.TryRemove(connectionPool.Name, out var removedConnectionPool))
+                {                    
+                    removedConnectionPool.Dispose();
+                    _logger.LogInformation("connection pool {PoolName} of type {Type} cleaned up '{Reason}'", connectionPool.Name, type, reason);
+                }                
             }
             else
             {
@@ -104,8 +108,11 @@ public abstract class PipeConnectionPoolBase : IDisposable
         foreach(var connectionPool in connections.Values)
         {
             connectionPool.DisableConnections(_ => true, "stopped");
-            connections.TryRemove(connectionPool.Name, out _);
-            _logger.LogInformation("connection pool {PoolName} of type {Type} cleaned up '{Reason}'", connectionPool.Name, type, "stopped");
+            if (connections.TryRemove(connectionPool.Name, out var removedConnectionPool))
+            {                    
+                removedConnectionPool.Dispose();
+                _logger.LogInformation("connection pool {PoolName} of type {Type} cleaned up '{Reason}'", connectionPool.Name, type, "stopped");
+            }                                        
         }
     }    
 
