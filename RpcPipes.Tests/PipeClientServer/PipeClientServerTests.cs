@@ -149,7 +149,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
 
         Assert.That(Messages["active-messages"], Is.EqualTo(0));
         Assert.That(Messages["handled-messages"], Is.EqualTo(1));
-Assert.That(Messages["sent-messages"], Is.EqualTo(1));
+        Assert.That(Messages["sent-messages"], Is.EqualTo(1));
         Assert.That(Messages["received-messages"], Is.EqualTo(1));
 
         ServerStop.Cancel();

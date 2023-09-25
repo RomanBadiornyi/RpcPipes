@@ -1,6 +1,5 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
-using RpcPipes.PipeHeartbeat;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
 
@@ -14,9 +13,8 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
     private readonly static Counter<int> HandledMessagesCounter = Meter.CreateCounter<int>("handled-messages");
 
     private readonly ILogger _logger;
-    private readonly IPipeHeartbeatHandler _heartbeatHandler;
-    private readonly IPipeHeartbeatReporter _heartbeatReporter;
-    private readonly Func<PipeServerRequestMessage, bool> _setupRequest;
+    private readonly Func<PipeServerRequestMessage, CancellationToken, bool> _onMessageReceived;
+    private readonly Func<PipeServerRequestMessage, CancellationTokenSource> _getMessageCancellation;
 
     public string Pipe { get; }
     public Task ServerTask { get; }
@@ -25,14 +23,12 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
         ILogger logger,
         string pipe,
         PipeMessageDispatcher connectionPool,
-        IPipeHeartbeatHandler heartbeatHandler,
-        IPipeHeartbeatReporter heartbeatReporter,
-        Func<PipeServerRequestMessage, bool> setupRequest)
+        Func<PipeServerRequestMessage, CancellationToken, bool> onMessageReceived,
+        Func<PipeServerRequestMessage, CancellationTokenSource> getMessageCancellation)
     {
-        _logger = logger;
-        _heartbeatHandler = heartbeatHandler;
-        _heartbeatReporter = heartbeatReporter;
-        _setupRequest = setupRequest;
+        _logger = logger;        
+        _onMessageReceived = onMessageReceived;
+        _getMessageCancellation = getMessageCancellation;
         Pipe = pipe;
         ServerTask = connectionPool.ProcessServerMessages(this);
     }
@@ -45,10 +41,8 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
                 //ensure we add current request to outstanding messages before we complete reading request payload
                 //this way we ensure that when client starts doing heartbeat calls - we already can reply as we know about this message
                 requestMessage = new PipeServerRequestMessage(id, reply);
-                if (!_heartbeatHandler.StartMessageHandling(requestMessage.Id, cancellation, _heartbeatReporter))
+                if (!_onMessageReceived.Invoke(requestMessage, cancellation))
                     requestMessage = null;
-                else
-                    _setupRequest.Invoke(requestMessage);
             }, cancellation);
         if (header != null && requestMessage != null)
         {
@@ -71,11 +65,11 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
         async Task ExecuteAsync()
         {
             PendingMessagesCounter.Add(-1);
-            ActiveMessagesCounter.Add(1);
-            _heartbeatHandler.TryGetMessageState(requestMessage.Id, out var messageState);
+            ActiveMessagesCounter.Add(1);                        
             try
             {
-                await requestMessage.RunRequest.Invoke(messageState.Cancellation);
+                var cancellationSource = _getMessageCancellation.Invoke(requestMessage);
+                await requestMessage.RunRequest.Invoke(cancellationSource);
             }
             catch (OperationCanceledException)
             {

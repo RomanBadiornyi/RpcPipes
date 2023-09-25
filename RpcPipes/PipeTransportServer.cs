@@ -75,8 +75,9 @@ public class PipeTransportServer
 
             var heartbeatReporter = messageHandler as IPipeHeartbeatReporter;
             HeartbeatIn = new PipeHeartbeatInHandler<TP>(_logger, _heartbeatPipe, MessageDispatcher, heartbeatHandler, _messageWriter);
-            RequestIn = new PipeRequestInHandler(_logger, _receivePipe, MessageDispatcher, heartbeatHandler, heartbeatReporter, SetupRequestCallbacks);
-            ReplyOut = new PipeReplyOutHandler(_logger, MessageDispatcher, heartbeatHandler);
+
+            RequestIn = new PipeRequestInHandler(_logger, _receivePipe, MessageDispatcher, MessageStarted, MessageCancellation);
+            ReplyOut = new PipeReplyOutHandler(_logger, MessageDispatcher, MessageCompleted);
 
             _connectionsTask = Task
                 //first complete all server connections
@@ -90,8 +91,27 @@ public class PipeTransportServer
             _started = true;
             return _connectionsTask;
 
-            bool SetupRequestCallbacks(PipeServerRequestMessage request)
-                => SetupRequest(request, messageHandler, heartbeatHandler);
+            bool MessageStarted(PipeServerRequestMessage message, CancellationToken cancellation)
+            {
+                if (heartbeatHandler.StartMessageHandling(message.Id, cancellation, heartbeatReporter))
+                {
+                    SetupRequest(message, messageHandler, heartbeatHandler);
+                    return true;
+                }
+                return false;
+            }
+
+            CancellationTokenSource MessageCancellation(PipeServerRequestMessage message)
+            {
+                return heartbeatHandler.TryGetMessageState(message.Id, out var messageState) 
+                    ? messageState.Cancellation
+                    : null;
+            }
+
+            bool MessageCompleted(PipeServerRequestMessage message)
+            {
+                return heartbeatHandler.EndMessageHandling(message.Id);
+            }
         }
     }
 
