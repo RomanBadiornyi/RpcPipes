@@ -127,7 +127,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 0);
+            var request = new PipeRequestMessage("hello world", 10);
 
             var requestContext = new PipeRequestContext
             {
