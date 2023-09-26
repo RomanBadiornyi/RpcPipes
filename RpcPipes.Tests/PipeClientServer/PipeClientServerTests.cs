@@ -27,6 +27,11 @@ public class PipeClientServerTests : BasePipeClientServerTests
         await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
+        }
+
+        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+            ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
+        {
             SetupClient(pipeClient);
             var request = new PipeRequestMessage("hello world", 0);
             var requestContext = new PipeRequestContext();
@@ -151,6 +156,75 @@ public class PipeClientServerTests : BasePipeClientServerTests
         Assert.That(Messages["handled-messages"], Is.EqualTo(1));
         Assert.That(Messages["sent-messages"], Is.EqualTo(1));
         Assert.That(Messages["received-messages"], Is.EqualTo(1));
+
+        ServerStop.Cancel();
+        await ServerTask;
+    }
+
+    [TestCase(5, 10)]
+    [TestCase(10, 10)]
+    public async Task RequestReply_OnTimeout_RequestsInBatchCancelled(int tasksReachingServerCount, int tasksCount)
+    {
+        var receivedTasksCount = 0;
+        var receiveEventHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
+        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
+        messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
+            .Returns(async args =>
+            {
+                var received = Interlocked.Increment(ref receivedTasksCount);
+                //signal that expected number of tasks reached server side so we can stop client
+                if (received == tasksReachingServerCount)
+                    receiveEventHandle.Set();                
+                await Task.Delay(TimeSpan.FromSeconds(30), (CancellationToken)args[1]);
+                return new PipeReplyMessage("hi");
+            });
+
+        var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
+        var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
+        ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
+
+        Task<PipeReplyMessage>[] requests = null;
+        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+            ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
+        {
+            SetupClient(pipeClient);
+            var request = new PipeRequestMessage("hello world", 0);
+            var requestContext = new PipeRequestContext { Heartbeat = TimeSpan.FromMilliseconds(10) };
+            var cts = new CancellationTokenSource();
+            requests = Enumerable.Range(0, tasksCount)
+                .Select(async i => 
+                {
+                    //if we want to cancel some of the tasks before they reach server side - apply wait logic here
+                    if (tasksCount - tasksReachingServerCount > 0 && i > (tasksCount - tasksReachingServerCount / 2))
+                    {
+                        receiveEventHandle.WaitOne(TimeSpan.FromSeconds(10));
+                        await Task.Delay(TimeSpan.FromMilliseconds(i - tasksReachingServerCount));
+                    }
+                    return await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, cts.Token);
+                })
+                .ToArray();
+            //wait for message to arrive to server
+            receiveEventHandle.WaitOne(TimeSpan.FromSeconds(10));
+        }
+
+        var exceptions = new List<Exception>();
+        foreach (var request in requests)
+        {
+            try
+            {
+                var reply = await request;
+                Assert.That(reply, Is.Null);
+            }
+            catch (Exception ex)
+            {
+                exceptions.Add(ex);
+            }            
+        }
+        Assert.That(exceptions, Has.Count.EqualTo(tasksCount));
+        var serverExceptions = exceptions.OfType<PipeServerException>().ToList();
+        var clientExceptions = exceptions.OfType<OperationCanceledException>().ToList();
+        Assert.That(serverExceptions, Has.Count.GreaterThanOrEqualTo(tasksReachingServerCount));
+        Assert.That(clientExceptions, Has.Count.LessThanOrEqualTo(tasksCount - tasksReachingServerCount));
 
         ServerStop.Cancel();
         await ServerTask;

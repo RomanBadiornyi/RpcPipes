@@ -17,7 +17,7 @@ internal class PipeRequestOutHandler : IPipeMessageSender<PipeClientRequestMessa
     private readonly PipeRequestHandler _requestHandler;
     private readonly Channel<PipeClientRequestMessage> _requestChannel;
 
-    public Task ClientTask { get; }
+    public Task<bool> ClientTask { get; }
 
     public PipeRequestOutHandler(
         ILogger logger,
@@ -29,7 +29,11 @@ internal class PipeRequestOutHandler : IPipeMessageSender<PipeClientRequestMessa
         _pipe = pipe;
         _requestHandler = requestHandler;
         _requestChannel =  Channel.CreateUnbounded<PipeClientRequestMessage>();
-        ClientTask = connectionPool.ProcessClientMessages(_requestChannel, this);
+        ClientTask = connectionPool.ProcessClientMessages(_requestChannel, this)
+            .ContinueWith(t => 
+            {
+                return t.IsCompleted;
+            }, CancellationToken.None);
     }
 
     public async ValueTask Publish(PipeClientRequestMessage message)
@@ -42,24 +46,28 @@ internal class PipeRequestOutHandler : IPipeMessageSender<PipeClientRequestMessa
 
     public async Task HandleMessage(PipeClientRequestMessage message, PipeProtocol protocol, CancellationToken cancellation)
     {
-        message.RequestCancellation.ThrowIfCancellationRequested();
-        //if we get to this point and request not cancelled we send message to server without interruption by passing global cancellation.
-        await message.SendAction.Invoke(protocol, cancellation);
-        _sentMessagesCounter.Add(1);
-        await _requestHandler.RequestMessageSent(message);
-        _logger.LogDebug("sent message {MessageId} for execution", message.Id);
+        //since we pick message from the messages queue it could be picked up with some delay with respect to when it was actually triggered
+        //during this delay client might decide to cancel request execution, if this is the case - don't call server and simply set error 
+        if (message.RequestCancellation.IsCancellationRequested)
+        {
+            var requestCancelledError = new TaskCanceledException("Request execution has been cancelled");
+            message.RequestTask.TrySetException(requestCancelledError);
+        }
+        else 
+        {
+            await message.SendAction.Invoke(protocol, cancellation);            
+            await _requestHandler.RequestMessageSent(message);
+            _sentMessagesCounter.Add(1);
+            _logger.LogDebug("sent message {MessageId} for execution", message.Id);
+        }        
     }
 
     public async ValueTask HandleError(PipeClientRequestMessage message, Exception error, CancellationToken cancellation)
     {
         if (error is PipeDataException || cancellation.IsCancellationRequested)
-        {
             message.RequestTask.TrySetException(error);
-        }
         else
-        {
             await HandleSendMessageError(message, error);
-        }
     }
 
     private async ValueTask HandleSendMessageError(PipeClientRequestMessage requestMessage, Exception e)

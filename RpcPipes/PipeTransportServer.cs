@@ -178,7 +178,7 @@ public class PipeTransportServer
         }
         catch (OperationCanceledException e)
         {
-            _logger.LogWarning("request execution was cancelled for message {MessageId}", requestContainer.Handle.Id);
+            _logger.LogInformation("request execution was cancelled for message {MessageId}", requestContainer.Handle.Id);
             requestContainer.ResponseMessage.SetRequestException(e);
         }
         catch (Exception e)

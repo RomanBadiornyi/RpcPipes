@@ -32,12 +32,15 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
     {
         PipeClientRequestMessage requestMessage = null;
         var header = await protocol
-            .BeginReceiveMessage(id => { requestMessage = TryMarkMessageAsCompleted(id, _requestHandler); }, cancellation);
+            .BeginReceiveMessage(id => { requestMessage = GetRequestMessage(id, _requestHandler); }, cancellation);
         if (header != null && requestMessage != null)
         {
             await requestMessage.HeartbeatCheckHandle.WaitAsync(cancellation);
             try
             {
+                //ensure we stop heartbeat task as soon as we started receiving reply
+                requestMessage.RequestCompleted = true;
+                _logger.LogDebug("received reply message {MessageId}, cancelled heartbeat updated", requestMessage.Id);
                 await ReceiveMessage(requestMessage, protocol, cancellation);   
             }
             finally
@@ -49,19 +52,11 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
         return true;
     }
 
-    private PipeClientRequestMessage TryMarkMessageAsCompleted(Guid id, PipeRequestHandler requestHandler)
-    {
-        //ensure we stop heartbeat task as soon as we started receiving reply
+    private PipeClientRequestMessage GetRequestMessage(Guid id, PipeRequestHandler requestHandler)
+    {        
         var requestMessage = requestHandler.GetRequestMessageById(id);
-        if (requestMessage != null)
-        {
-            requestMessage.RequestCompleted = true;
-            _logger.LogDebug("received reply message {MessageId}, cancelled heartbeat updated", requestMessage.Id);
-        }
-        else
-        {
+        if (requestMessage == null)
             _logger.LogWarning("received reply message {MessageId} not found in request queue", id);
-        }
         return requestMessage;
     }
 

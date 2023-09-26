@@ -11,7 +11,7 @@ namespace RpcPipes.PipeHandlers;
 
 internal abstract class PipeHeartbeatOutHandler : IPipeMessageSender<PipeClientHeartbeatMessage>
 {
-    public abstract Task ClientTask { get; }
+    public abstract Task<bool> ClientTask { get; }
     public abstract ValueTask Publish(PipeClientHeartbeatMessage message);
 
     public abstract string TargetPipe(PipeClientHeartbeatMessage message);
@@ -31,7 +31,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
     private readonly Timer _heartbeatResumer;
     private readonly TimeSpan _heartbeatsPauseInterval;
 
-    public override Task ClientTask { get; }
+    public override Task<bool> ClientTask { get; }
 
     public PipeHeartbeatOutHandler(
         ILogger logger,
@@ -48,19 +48,21 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
 
         _heartbeatsPauseInterval = TimeSpan.FromMilliseconds(100);
         _heartbeatsPaused = new ConcurrentStack<PipeClientHeartbeatMessage>();
-        _heartbeatResumer = new Timer(_ => ResumeHeartbeat(), this, 0, (int)_heartbeatsPauseInterval.TotalMilliseconds);
+        _heartbeatResumer = new Timer(_ => ResumeHeartbeat(connectionPool.Cancellation), this, 0, (int)_heartbeatsPauseInterval.TotalMilliseconds);
 
         ClientTask = Task.WhenAll(connectionPool.ProcessClientMessages(_heartbeatsChannel, this))
-            .ContinueWith(_ =>
-            {
+            .ContinueWith(t =>
+            {                
                 _heartbeatResumer.Dispose();
                 _heartbeatsPaused.Clear();
-            });
+                return t.IsCompleted;
+            }, CancellationToken.None)
+            .ContinueWith(t => t.Result, CancellationToken.None);
     }
 
-    private void ResumeHeartbeat()
+    private void ResumeHeartbeat(CancellationToken cancellation)
     {
-        while (true)
+        while (!cancellation.IsCancellationRequested)
         {
             if (_heartbeatsPaused.TryPop(out var head))
             {
@@ -69,7 +71,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
                 var itemsVerified = false;
                 var itemMinWaitTime = _heartbeatsPauseInterval.TotalMilliseconds + 1;
 
-                while (!itemsVerified)
+                while (!itemsVerified && !cancellation.IsCancellationRequested)
                 {
                     if (!ShouldDoHeartbeat(message, out var delay))
                     {

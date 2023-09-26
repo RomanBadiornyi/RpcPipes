@@ -71,7 +71,12 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
             await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(logger, sendPipe, receivePipe, connections, heartbeatReceiver, serializer); 
             var c = pipeClient;
             
-            runCancellation.Token.Register(async () => await pipeClient.DisposeAsync());
+            runCancellation.Token.Register(async () => 
+            {
+                Console.WriteLine("Received signal to stop client and all pending tasks");
+                await pipeClient.DisposeAsync();
+                Console.WriteLine("Client has been stopped");
+            });
 
             logger.LogInformation("Starting client, press Ctrl+C to interrupt");                        
             var replies = Array.Empty<(PipeReplyMessage Reply, Exception Error)>();
@@ -94,7 +99,7 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
                 Console.WriteLine("Errors {0}", errors.Length);                
                 foreach (var e in errors.Take(10))
                 {
-                    logger.LogError(e.Error.ToString());
+                    logger.LogError(e.Error.Message);
                 }        
             }
             

@@ -16,7 +16,7 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
     private readonly Func<PipeServerRequestMessage, bool> _onMessageCompleted;
     private readonly Channel<PipeServerRequestMessage> _responseChannel;
 
-    public Task ClientTask { get; }
+    public Task<bool> ClientTask { get; }
 
     public PipeReplyOutHandler(
         ILogger logger,
@@ -26,7 +26,8 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
         _logger = logger;
         _onMessageCompleted = onMessageCompleted;
         _responseChannel = Channel.CreateUnbounded<PipeServerRequestMessage>();
-        ClientTask = connectionPool.ProcessClientMessages(_responseChannel, this);
+        ClientTask = connectionPool.ProcessClientMessages(_responseChannel, this)
+            .ContinueWith(t => t.IsCompleted, CancellationToken.None);
     }
 
     public async ValueTask Publish(PipeServerRequestMessage message)

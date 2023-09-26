@@ -6,7 +6,7 @@ namespace RpcPipes.PipeHandlers;
 public interface IPipeMessageSender<T> 
     where T : IPipeMessage
 {
-    Task ClientTask { get; }
+    Task<bool> ClientTask { get; }
     ValueTask Publish(T message);
 
     string TargetPipe(T message);    
