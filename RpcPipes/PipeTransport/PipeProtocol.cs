@@ -17,24 +17,24 @@ public class PipeProtocol
         _contentBuffer = contentBuffer;
     }    
 
-    public async Task<bool> BeginTransferMessage(
-        PipeMessageHeader header, CancellationToken cancellation)
+    public async Task<bool> BeginTransferMessage(PipeMessageHeader header, CancellationToken cancellation)
     {
         await SendMessageHeader(header, cancellation);
         return await WaitAcknowledge(header.MessageId, false, cancellation);
     }
 
-    public async Task EndTransferMessage(
-        Guid messageId, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
+    public async Task<bool> EndTransferMessage(Guid messageId, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
         await SendMessage(writeFunc, cancellation);
-        await WaitAcknowledge(messageId, true, cancellation);
+        return await WaitAcknowledge(messageId, true, cancellation);
     }
 
-    public async Task TransferMessage(PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
+    public async Task<bool> TransferMessage(PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
-        await BeginTransferMessage(header, cancellation);
-        await EndTransferMessage(header.MessageId, writeFunc, cancellation);
+        var ack = await BeginTransferMessage(header, cancellation);
+        if (ack)
+            return await EndTransferMessage(header.MessageId, writeFunc, cancellation);
+        return false;
     }
 
     public async Task<bool> TryTransferMessage(PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
@@ -43,11 +43,11 @@ public class PipeProtocol
         var ack = await WaitAcknowledge(header.MessageId, true, cancellation);
         if (ack)
             await EndTransferMessage(header.MessageId, writeFunc, cancellation);
-        return ack;
+        return false;
     }
 
-    public async Task<T> BeginReceiveMessage<T>(T messageHeader, Func<T, bool> onAcceptAction, CancellationToken cancellation)
-        where T : PipeMessageHeader
+    public async Task<THeader> BeginReceiveMessage<THeader>(THeader messageHeader, Func<THeader, bool> onAcceptAction, CancellationToken cancellation)
+        where THeader : PipeMessageHeader
     {
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
