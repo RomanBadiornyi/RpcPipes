@@ -64,7 +64,7 @@ internal class PipeRequestOutHandler : IPipeMessageSender<PipeClientRequestMessa
 
     public async ValueTask HandleError(PipeClientRequestMessage message, Exception error, CancellationToken cancellation)
     {
-        if (error is PipeDataException || cancellation.IsCancellationRequested)
+        if (error is PipeDataException || cancellation.IsCancellationRequested || error is PipeConnectionsExhausted)
             message.RequestTask.TrySetException(error);
         else
             await HandleSendMessageError(message, error);

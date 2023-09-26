@@ -190,9 +190,16 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
     {
         _logger.LogDebug("sending request message {MessageId} to server", id);
         var header = new PipeAsyncMessageHeader { MessageId = id, ReplyPipe = ReplyIn.Pipe };
-        await protocol.BeginTransferMessageAsync(header, cancellation);
-        await protocol.EndTransferMessage(id, Write, cancellation);
-        _logger.LogDebug("sent request message {MessageId} to server", id);
+        var accept = await protocol.BeginTransferMessage(header, cancellation);
+        if (accept)
+        {
+            await protocol.EndTransferMessage(id, Write, cancellation);        
+            _logger.LogDebug("sent request message {MessageId} to server", id);
+        }        
+        else 
+        {
+            _logger.LogDebug("server rejected request message {MessageId}", id);
+        }
 
         Task Write(Stream stream, CancellationToken c)
             => _messageWriter.WriteRequest(request, stream, c);

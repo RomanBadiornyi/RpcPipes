@@ -21,6 +21,7 @@ public class PipeConnectionGroup<T> : IDisposable
 
     private ILogger _logger;
     private bool _completed;
+    private int _connectionsInUse = 0;
 
     public string Name { get; }
 
@@ -34,6 +35,7 @@ public class PipeConnectionGroup<T> : IDisposable
     public IEnumerable<T> Connections => AllConnections.Values;
 
     public int Instances { get; }
+    public DateTime LastActive { get; private set; }
     public DateTime LastUsed { get; private set; }
     public TimeSpan ConnectionRetryTime { get; }
     public TimeSpan ConnectionResumeTime { get; }    
@@ -71,10 +73,12 @@ public class PipeConnectionGroup<T> : IDisposable
         => (DateTime.UtcNow - LastUsed).TotalMilliseconds > usageTimeoutMilliseconds;
 
     public bool IsNotActive()
-        => WaitHandles.Count == 0;
+        => WaitHandles.Count == 0 && _connectionsInUse == 0;
 
     public async ValueTask<(T Connection, AggregateException Error)> BorrowConnection(int timeout)
     {
+        LastUsed = DateTime.UtcNow;
+        
         //asynchronously wait for connection to appear in free connection stack (most recently used) or disabled connection
         T connection = default;
         ConnectionWaitHandle connectionHandle = null;
@@ -84,6 +88,11 @@ public class PipeConnectionGroup<T> : IDisposable
                 !FreeConnections.TryPop(out connection) &&
                 !DisabledConnections.TryDequeue(out connection))
             {
+                if (DateTime.UtcNow - LastActive > ConnectionRetryTime)
+                {
+                    //if no connections has been updated within timeout - return null
+                    break;
+                }
                 if (connectionHandle == null || connectionHandle.IsActive == 0)
                 {
                     connectionHandle = new ConnectionWaitHandle();
@@ -95,7 +104,7 @@ public class PipeConnectionGroup<T> : IDisposable
                     (state, timedOut) => ((TaskCompletionSource<bool>)state).TrySetResult(!timedOut), tcs, timeout, true);
                     
                 var success = await tcs.Task;                                        
-                if (!success && DateTime.UtcNow - LastUsed > ConnectionRetryTime)
+                if (!success && DateTime.UtcNow - LastActive > ConnectionRetryTime)
                 {
                     //if no connections has been updated within timeout - return null
                     break;
@@ -105,12 +114,17 @@ public class PipeConnectionGroup<T> : IDisposable
         AggregateException errors = null;
         if (connection == null)
             errors = new AggregateException(BrokenConnections.Values.Select(v => v.Error));
+        else
+            Interlocked.Increment(ref _connectionsInUse);
         return (connection, errors);
     }
 
     public void ReturnConnection(T connection, Exception error)
     {
+        LastUsed = DateTime.UtcNow;
+
         //connections with errors go to broken connection pool and will become available once restored
+        var newConnectionAvailable = false;
         if (error != null)
         {
             var reason = error is OperationCanceledException ? "cancelled" : $"error: {error.Message}";
@@ -125,14 +139,17 @@ public class PipeConnectionGroup<T> : IDisposable
             {
                 _logger.LogInformation("disabled connection {Pipe} due to connection error {Reason}", connection.Name, reason);
                 DisabledConnections.Enqueue(connection);
-                SignalNewConnection();
+                newConnectionAvailable = true;
             }
         }
         else
         {
             FreeConnections.Push(connection);
-            SignalNewConnection();
+            newConnectionAvailable = true;
         }
+        Interlocked.Decrement(ref _connectionsInUse);        
+        if (newConnectionAvailable)
+            SignalNewConnection();
     }
 
     public void RestoreConnections()
@@ -185,7 +202,7 @@ public class PipeConnectionGroup<T> : IDisposable
 
     private void SignalNewConnection()
     {
-        LastUsed = DateTime.UtcNow;
+        LastActive = DateTime.UtcNow;
 
         var signaled = false;
         while (!signaled)

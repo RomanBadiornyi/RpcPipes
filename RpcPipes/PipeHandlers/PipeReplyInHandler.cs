@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeData;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
 
@@ -32,7 +33,15 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
     {
         PipeClientRequestMessage requestMessage = null;
         var header = await protocol
-            .BeginReceiveMessage(id => { requestMessage = GetRequestMessage(id, _requestHandler); }, cancellation);
+            .BeginReceiveMessage(
+                new PipeMessageHeader(), 
+                h => 
+                { 
+                    requestMessage = _requestHandler.GetRequestMessageById(h.MessageId);
+                    if (requestMessage == null)
+                        _logger.LogWarning("received reply message {MessageId} not found in request queue", h.MessageId);
+                    return requestMessage != null;
+                }, cancellation);
         if (header != null && requestMessage != null)
         {
             await requestMessage.HeartbeatCheckHandle.WaitAsync(cancellation);
@@ -50,14 +59,6 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
             return false;
         }
         return true;
-    }
-
-    private PipeClientRequestMessage GetRequestMessage(Guid id, PipeRequestHandler requestHandler)
-    {        
-        var requestMessage = requestHandler.GetRequestMessageById(id);
-        if (requestMessage == null)
-            _logger.LogWarning("received reply message {MessageId} not found in request queue", id);
-        return requestMessage;
     }
 
     private async Task ReceiveMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)

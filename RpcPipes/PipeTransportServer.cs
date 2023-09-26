@@ -132,7 +132,7 @@ public class PipeTransportServer
 
             requestMessage.ReadRequest = (protocol, token) => ReadRequest(requestContainer, protocol, token);
             requestMessage.RunRequest = (cancellation) => RunRequest(messageHandler, heartbeatHandler, requestContainer, cancellation);
-            requestMessage.SendResponse = (protocol, token) => SendRequest(requestContainer, protocol, token); 
+            requestMessage.SendResponse = (protocol, token) => SendReply(requestContainer, protocol, token); 
             requestMessage.ReportError = (exception) => ReportError(requestContainer, exception); 
             return true;            
         }        
@@ -147,6 +147,10 @@ public class PipeTransportServer
             requestContainer.RequestMessage = await protocol.EndReceiveMessage(requestContainer.Handle.Id, _messageWriter.ReadRequest<TReq>, cancellation);
             _logger.LogDebug("read request message {MessageId}", requestContainer.Handle.Id);
             return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
         catch (Exception e)
         {
@@ -190,11 +194,11 @@ public class PipeTransportServer
         await ReplyOut.Publish(requestContainer.Handle);
     }
 
-    private async Task SendRequest<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
+    private async Task SendReply<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, PipeProtocol protocol, CancellationToken cancellation)
     {
         _logger.LogDebug("sending reply for message {MessageId} back to client", requestContainer.Handle.Id);
         var pipeMessageHeader = new PipeMessageHeader { MessageId = requestContainer.Handle.Id };
-        await protocol.TransferMessage(pipeMessageHeader, Write, cancellation);
+        await protocol.TryTransferMessage(pipeMessageHeader, Write, cancellation);
         _logger.LogDebug("sent reply for message {MessageId} back to client", requestContainer.Handle.Id);
 
        Task Write(Stream stream, CancellationToken c)

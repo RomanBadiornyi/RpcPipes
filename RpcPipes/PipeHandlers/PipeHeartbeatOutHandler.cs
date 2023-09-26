@@ -191,7 +191,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
                     await _heartbeatReceiver.OnHeartbeatMessage(pipeHeartbeat);
                 }
             }
-            else
+            else if (!heartbeatMessage.RequestCancellation.IsCancellationRequested)
             {
                 _logger.LogWarning("cancelling execution of request message {MessageId} as it's not handled by the server", heartbeatMessage.Id);
                 heartbeatMessage.HeartbeatCancellation.Cancel();

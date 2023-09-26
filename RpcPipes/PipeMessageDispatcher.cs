@@ -2,6 +2,7 @@ using System.IO.Pipes;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using RpcPipes.PipeConnections;
+using RpcPipes.PipeExceptions;
 using RpcPipes.PipeHandlers;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
@@ -118,6 +119,11 @@ public class PipeMessageDispatcher
                 if (!dispatched && error != null && error is not OperationCanceledException)
                 {           
                     //if message was not dispatched - report error to sender and let it handle that                 
+                    await messageSender.HandleError(item, error, Cancellation);
+                }
+                else if (error != null && error is PipeConnectionsExhausted)
+                {
+                    //we run out of available connections so force to handle such error regardless if message was dispatched or not
                     await messageSender.HandleError(item, error, Cancellation);
                 }
                 else if (error != null)

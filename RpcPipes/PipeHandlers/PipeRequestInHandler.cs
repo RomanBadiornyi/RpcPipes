@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
+using RpcPipes.PipeData;
 using RpcPipes.PipeMessages;
 using RpcPipes.PipeTransport;
 
@@ -37,12 +38,15 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
     {
         PipeServerRequestMessage requestMessage = null;
         var header = await protocol
-            .BeginReceiveMessageAsync((id, reply) => {
+            .BeginReceiveMessage(
+                new PipeAsyncMessageHeader(),
+                h => {
                 //ensure we add current request to outstanding messages before we complete reading request payload
                 //this way we ensure that when client starts doing heartbeat calls - we already can reply as we know about this message
-                requestMessage = new PipeServerRequestMessage(id, reply);
+                requestMessage = new PipeServerRequestMessage(h.MessageId, h.ReplyPipe);
                 if (!_onMessageReceived.Invoke(requestMessage, cancellation))
                     requestMessage = null;
+                return requestMessage != null;
             }, cancellation);
         if (header != null && requestMessage != null)
         {

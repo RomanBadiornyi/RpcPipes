@@ -65,7 +65,7 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
                 _logger.LogWarning("requested heartbeat for unknown message {MessageId}", pipeHeartbeatRequest.Id);
             }
             var heartbeatHeader = new PipeMessageHeader { MessageId = pipeHeartbeatRequest.Id };
-            await protocol.TransferMessage(heartbeatHeader, WriteHeartbeat, cancellation);
+            await protocol.TryTransferMessage(heartbeatHeader, WriteHeartbeat, cancellation);
             return false;
         }
         return true;

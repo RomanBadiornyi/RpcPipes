@@ -56,27 +56,33 @@ internal class PipeReplyOutHandler : IPipeMessageSender<PipeServerRequestMessage
             await RetryOrComplete(message, error);
     }
 
-    private async ValueTask RetryOrComplete(PipeServerRequestMessage message, Exception e)
+    private async ValueTask RetryOrComplete(PipeServerRequestMessage message, Exception error)
     {
         message.Retries += 1;
-        if (message.Retries >= 3)
+        if (error is PipeConnectionsExhausted)
         {
             //we did retry 3 times, if still no luck - drop message
             _onMessageCompleted.Invoke(message);
-            _logger.LogError(e, "unable to send message {MessageId} due to error '{ErrorMessage}'", message.Id, message.Id, e.Message);
+            _logger.LogError("unable to send message {MessageId} due to error '{ErrorMessage}'", message.Id, error.Message);
+        }
+        else if (message.Retries >= 3)
+        {
+            //we did retry 3 times, if still no luck - drop message
+            _onMessageCompleted.Invoke(message);
+            _logger.LogError(error, "unable to send message {MessageId} due to error '{ErrorMessage}'", message.Id, error.Message);
         }
         else
         {
             //publish to retry
-            _logger.LogDebug("retry sending reply for message {MessageId} due to error '{ErrorMessage}'", message.Id, e.Message);
+            _logger.LogDebug("retry sending reply for message {MessageId} due to error '{ErrorMessage}'", message.Id, error.Message);
             await Publish(message);
         }
     }
 
-    private async Task ReportErrorOrComplete(PipeServerRequestMessage message, Exception e)
+    private async Task ReportErrorOrComplete(PipeServerRequestMessage message, Exception error)
     {
         message.Retries += 1;
-        if (message.Retries >= 3 || !await message.ReportError(e))
+        if (message.Retries >= 3 || !await message.ReportError(error))
         {
             //this means that we were not able to send error back to client, in this case simply drop message
             _onMessageCompleted.Invoke(message);
