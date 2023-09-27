@@ -102,7 +102,6 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
                 Array.Copy(_buffer, _bufferPosition, buffer, bufferClientPosition, bufferReadCount);
 
             _bufferPosition += bufferReadCount;
-            Position += bufferReadCount;
             bufferClientPosition += bufferReadCount;
             bufferReadTotal += bufferReadCount;
         }
@@ -123,8 +122,7 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
             if (bufferReadCount > 0)
                 Array.Copy(_buffer, _bufferPosition, buffer, bufferClientPosition, bufferReadCount);
 
-            _bufferPosition += bufferReadCount;
-            Position += bufferReadCount;
+            _bufferPosition += bufferReadCount;            
             bufferClientPosition += bufferReadCount;
             bufferReadTotal += bufferReadCount;
         }
@@ -211,7 +209,9 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
     {
         try
         {
-            return _networkStream.Read(buffer, offset, count);
+            var readCount = _networkStream.Read(buffer, offset, count);
+            Position += readCount;
+            return readCount;
         }
         catch (Exception e)
         {
@@ -223,7 +223,9 @@ public class PipeChunkReadStream : Stream, IAsyncDisposable
     {
         try
         {
-            return await _networkStream.ReadAsync(buffer, offset, count, cancellation);
+            var readCount = await _networkStream.ReadAsync(buffer, offset, count, cancellation);
+            Position += readCount;
+            return readCount;
         }
         catch (OperationCanceledException)
         {

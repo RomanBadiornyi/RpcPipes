@@ -15,7 +15,7 @@ public class PipeProtocol
         _stream = stream;
         _headerBuffer = headerBuffer;
         _contentBuffer = contentBuffer;
-    }    
+    }
 
     public async Task<bool> BeginTransferMessage(PipeMessageHeader header, CancellationToken cancellation)
     {
@@ -53,21 +53,25 @@ public class PipeProtocol
         where TMessage : class
     {
         var messageHeader = new THeader();
-        TMessage message = default;
+        var message = default(TMessage);
+        var readBytes = 0L;
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, cancellation);
-            if (await messageHeader.TryReadHeaderFromStream(pipeStream, cancellation))
+            var headerRead = await messageHeader.TryReadHeaderFromStream(pipeStream, cancellation);
+            readBytes = pipeStream.Position;
+            if (headerRead)
             {
-                message = messageFunc.Invoke(messageHeader);                
+                message = messageFunc.Invoke(messageHeader);
                 return message;
             }
         }
         finally
         {
-            await SendAcknowledge(messageHeader.MessageId, message != default, cancellation);
             ArrayPool<byte>.Shared.Return(chunkBuffer);
+            if (readBytes > 0)
+                await SendAcknowledge(messageHeader.MessageId, message != default, cancellation);
         }
         return message;
     }
@@ -75,21 +79,30 @@ public class PipeProtocol
     public async Task<T> EndReceiveMessage<T>(Guid messageId, Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
         T message;
+        var readBytes = 0L;
+        var completed = false;
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_contentBuffer);
         try
         {
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _contentBuffer, _stream, cancellation);
             message = await readFunc.Invoke(pipeStream, cancellation);
+            readBytes = pipeStream.Position;
+            completed = true;
         }
         catch (Exception e) when (e is not PipeNetworkException)
         {
             throw new PipeDataException(e.Message, e);
-        }         
+        }
+        catch (Exception e)
+        {
+            throw e;
+        }
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
-            await SendAcknowledge(messageId, true, cancellation);
-        }        
+            if (readBytes > 0)
+                await SendAcknowledge(messageId, completed, cancellation);
+        }
         return message;
     }
 
@@ -129,7 +142,7 @@ public class PipeProtocol
         catch (Exception e) when (e is not PipeNetworkException)
         {
             throw new PipeDataException(e.Message, e);
-        } 
+        }
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
@@ -148,7 +161,7 @@ public class PipeProtocol
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, cancellation);
             ackReceived = false;
             var messageRead = await pipeStream.ReadTransaction(
-                new Func<PipeChunkReadStream, Task<bool>>[] 
+                new Func<PipeChunkReadStream, Task<bool>>[]
                 {
                     s => s.TryReadGuid(val => messageIdReceived = val, cancellation),
                     s => s.TryReadBoolean(val => ackReceived = val, cancellation)
@@ -159,15 +172,15 @@ public class PipeProtocol
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
-        }        
+        }
         if (messageIdReceived == messageId)
             return ackReceived;
-        //could happen that server receives message and sends ack but before we receive this ack here - 
+        //could happen that server receives message and sends ack but before we receive this ack here -
         //server drops connection due to various reasons, in this case we will read empty stream
         //there are 2 main reasons for ack logic:
-        //- is to prevent sending wrong data during BeginSend call 
+        //- is to prevent sending wrong data during BeginSend call
         //  which is not the case here, as those pass allowConnectionDrop here)
-        //- is to prevent client from dropping connection after sending data before server fully reads this data 
+        //- is to prevent client from dropping connection after sending data before server fully reads this data
         //  which also not the case here as this is server who drops connection, not the client
         if (messageIdReceived == Guid.Empty && allowConnectionDrop)
             return false;
