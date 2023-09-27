@@ -45,3 +45,38 @@ public class PipeAsyncMessageHeader : PipeMessageHeader
         return Ready;
     }
 }
+
+public class PipeAckMessage
+{
+    public Guid MessageId { get; set;}
+    public bool AckReceived { get; set;}
+
+    public PipeAckMessage()
+    {
+    }
+
+    public PipeAckMessage(Guid messageId, bool ackReceived)
+    {
+        MessageId = messageId;
+        AckReceived = ackReceived;
+    }
+
+    public async Task WriteToStream(PipeChunkWriteStream stream, CancellationToken cancellation)
+    {
+        await stream.WriteGuid(MessageId, cancellation);
+        await stream.WriteBoolean(AckReceived, cancellation);
+    }
+
+    public async Task ReadFromStream(PipeChunkReadStream stream, CancellationToken cancellation)
+    {
+        var ackReceived = false;
+        var messageRead = await stream.ReadTransaction(
+            new Func<PipeChunkReadStream, Task<bool>>[]
+            {
+                s => s.TryReadGuid(val => MessageId = val, cancellation),
+                s => s.TryReadBoolean(val => ackReceived = val, cancellation)
+            }
+        );
+        AckReceived = ackReceived && messageRead;
+    }
+}
