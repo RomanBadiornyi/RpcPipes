@@ -108,13 +108,13 @@ public class PipeProtocol
 
     public async Task<(T Message, bool Received)> TryReceiveMessage<T>(Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
-        var header = await BeginReceiveMessage<PipeMessageHeader, PipeMessageHeader>(HeaderToMessage, cancellation);
-        if (header.Ready)
-            return (await EndReceiveMessage(header.MessageId, readFunc, cancellation), true);
+        var message = await BeginReceiveMessage<PipeMessageHeader, PipeMessageHeader>(HeaderToMessage, cancellation);
+        if (message != default && message.Ready)
+            return (await EndReceiveMessage(message.MessageId, readFunc, cancellation), true);
         return (default, false);
 
-        static PipeMessageHeader HeaderToMessage(PipeMessageHeader h)
-            => h;
+        static PipeMessageHeader HeaderToMessage(PipeMessageHeader header)
+            => header;
     }
 
     private async Task SendMessageHeader(PipeMessageHeader header, CancellationToken cancellation)
