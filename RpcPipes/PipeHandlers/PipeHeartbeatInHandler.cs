@@ -70,10 +70,10 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
         }
         return true;
 
-        ValueTask<PipeRequestHeartbeat> ReadHeartbeat(Stream stream, CancellationToken c)
-            => _messageWriter.ReadData<PipeRequestHeartbeat>(stream, c);
+        async ValueTask<PipeRequestHeartbeat> ReadHeartbeat(PipeChunkReadStream stream, CancellationToken c)
+            => await new PipeRequestHeartbeat().ReadFromStream(stream, c);
 
-        Task WriteHeartbeat(Stream stream, CancellationToken c)
-            => _messageWriter.WriteData(pipeHeartbeat, stream, c);
+        async Task WriteHeartbeat(Stream stream, CancellationToken c)
+            => await _messageWriter.WriteData(pipeHeartbeat, stream, c);
     }
 }

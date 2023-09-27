@@ -12,7 +12,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_WhenServerDeserializeThrows_ErrorReturned()
     {        
-        var serializer = Substitute.ForPartsOf<PipeSerializer>();        
+        var serializer = Substitute.ForPartsOf<PipeJsonSerializer>();        
         serializer.ReadRequest<PipeRequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageRequest<PipeRequestMessage>>(_ => throw new InvalidOperationException("deserialize server error"));
         
@@ -39,7 +39,7 @@ public class PipeClientServerSerializerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_WhenClientDeserializeThrows_ErrorReturned()
     {        
-        var serializer = Substitute.ForPartsOf<PipeSerializer>();        
+        var serializer = Substitute.ForPartsOf<PipeJsonSerializer>();        
         serializer.ReadResponse<PipeReplyMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns<PipeMessageResponse<PipeReplyMessage>>(args => throw new InvalidOperationException("deserialize client error"));
         

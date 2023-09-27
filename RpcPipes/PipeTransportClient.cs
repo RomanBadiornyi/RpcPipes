@@ -212,8 +212,8 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             _logger.LogDebug("server rejected request message {MessageId}", id);
         }
 
-        Task Write(Stream stream, CancellationToken c)
-            => _messageWriter.WriteRequest(request, stream, c);
+        async Task Write(Stream stream, CancellationToken c)
+            => await _messageWriter.WriteRequest(request, stream, c);
     }
 
     private async Task<PipeMessageResponse<TRep>> ReadReply<TRep>(Guid id, PipeProtocol protocol, CancellationToken cancellation)
@@ -223,8 +223,8 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
         _logger.LogDebug("received reply for message {MessageId} from server", id);
         return response;
 
-        ValueTask<PipeMessageResponse<TRep>> Read(Stream stream, CancellationToken c)
-            => _messageWriter.ReadResponse<TRep>(stream, c);
+        async ValueTask<PipeMessageResponse<TRep>> Read(Stream stream, CancellationToken c)
+            => await _messageWriter.ReadResponse<TRep>(stream, c);
     }
 
     public void Dispose()

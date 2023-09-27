@@ -513,7 +513,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         messageHandler.HeartbeatMessage(Arg.Any<object>())
             .Returns(_ => new PipeHeartbeatMessage(0.5, ""));
         //should be no progress updates when serializer starts
-        var serializer = Substitute.ForPartsOf<PipeSerializer>();
+        var serializer = Substitute.ForPartsOf<PipeJsonSerializer>();
         serializer.ReadRequest<PipeRequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns(args => Serializer.ReadRequest<PipeRequestMessage>((Stream)args[0], (CancellationToken)args[1]))
             .AndDoes(_ => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());

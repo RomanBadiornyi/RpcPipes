@@ -144,7 +144,7 @@ public class PipeTransportServer
         try
         {
             _logger.LogDebug("reading request message {MessageId}", requestContainer.Handle.Id);
-            requestContainer.RequestMessage = await protocol.EndReceiveMessage(requestContainer.Handle.Id, _messageWriter.ReadRequest<TReq>, cancellation);
+            requestContainer.RequestMessage = await protocol.EndReceiveMessage(requestContainer.Handle.Id, Read, cancellation);
             _logger.LogDebug("read request message {MessageId}", requestContainer.Handle.Id);
             return true;
         }
@@ -159,6 +159,10 @@ public class PipeTransportServer
             await ReplyOut.Publish(requestContainer.Handle);
             return false;
         }
+
+        async ValueTask<PipeMessageRequest<TReq>> Read(Stream stream, CancellationToken c)
+            => await _messageWriter.ReadRequest<TReq>(stream, c);
+        
     }
 
     private async Task RunRequest<TReq, TRep>(
@@ -201,8 +205,8 @@ public class PipeTransportServer
         await protocol.TryTransferMessage(pipeMessageHeader, Write, cancellation);
         _logger.LogDebug("sent reply for message {MessageId} back to client", requestContainer.Handle.Id);
 
-       Task Write(Stream stream, CancellationToken c)
-            => _messageWriter.WriteResponse(requestContainer.ResponseMessage, stream, c);        
+       async Task Write(Stream stream, CancellationToken c)
+            => await _messageWriter.WriteResponse(requestContainer.ResponseMessage, stream, c);        
     }
 
     private async ValueTask<bool> ReportError<TReq, TRep>(PipeRequestResponse<TReq, TRep> requestContainer, Exception exception)

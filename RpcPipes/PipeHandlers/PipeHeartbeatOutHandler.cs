@@ -173,11 +173,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
 
     private async Task DoHeartbeat(PipeClientHeartbeatMessage heartbeatMessage, PipeProtocol protocol, CancellationToken cancellation)
     {
-        var pipeHeartbeatRequest = new PipeRequestHeartbeat
-        {
-            Id = heartbeatMessage.Id,
-            Active = !heartbeatMessage.RequestCancellation.IsCancellationRequested
-        };
+        var pipeHeartbeatRequest = new PipeRequestHeartbeat(heartbeatMessage.Id, !heartbeatMessage.RequestCancellation.IsCancellationRequested);
 
         var pipeMessageHeader = new PipeMessageHeader { MessageId = heartbeatMessage.Id };
         await protocol.TransferMessage(pipeMessageHeader, WriteHeartbeat, cancellation);
@@ -199,11 +195,11 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
             }
         }
 
-        Task WriteHeartbeat(Stream stream, CancellationToken c)
-            => _messageWriter.WriteData(pipeHeartbeatRequest, stream, c);
+        async Task WriteHeartbeat(PipeChunkWriteStream stream, CancellationToken c)
+            => await pipeHeartbeatRequest.WriteToStream(stream, c);
 
-        ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken c)
-            => _messageWriter.ReadData<TP>(stream, c);
+        async ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken c)
+            => await _messageWriter.ReadData<TP>(stream, c);
     }
 
     private bool ShouldDoHeartbeat(PipeClientHeartbeatMessage message, out TimeSpan delay)

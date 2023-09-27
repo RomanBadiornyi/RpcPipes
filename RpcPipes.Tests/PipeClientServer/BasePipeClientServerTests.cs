@@ -29,7 +29,7 @@ public class BasePipeClientServerTests
     protected ILogger<PipeTransportServer> ServerLogger;
     protected ILogger<PipeTransportClient<PipeHeartbeatMessage>> ClientLogger;
 
-    protected PipeSerializer Serializer;
+    protected PipeJsonSerializer Serializer;
     protected PipeMessageHandler MessageHandler;
     protected PipeHeartbeatMessageHandler HeartbeatHandler;
     protected ConcurrentBag<PipeHeartbeatMessage> HeartbeatReplies;
@@ -113,7 +113,7 @@ public class BasePipeClientServerTests
     [SetUp]
     public void SetupDependencies()
     {
-        Serializer = new PipeSerializer();
+        Serializer = new PipeJsonSerializer();
 
         MessageHandler = new PipeMessageHandler();
         HeartbeatHandler = new PipeHeartbeatMessageHandler();

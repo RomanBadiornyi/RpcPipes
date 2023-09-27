@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RpcPipes.Models;
@@ -66,7 +65,7 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
         async Task RunClientTasks(int clientId)
         {
             var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeHeartbeatMessage>>>();
-            var serializer = new PipeSerializer();
+            var serializer = new PipeMessagePackSerializer();
             var heartbeatReceiver = new PipeHeartbeatReceiverCounter();            
             var receivePipe = clientId.ToString();
             

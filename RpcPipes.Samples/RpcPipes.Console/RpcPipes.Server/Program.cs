@@ -24,7 +24,7 @@ var serviceProvider = new ServiceCollection()
     }).BuildServiceProvider();
 var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
 
-var serializer = new PipeSerializer();
+var serializer = new PipeMessagePackSerializer();
 var messageHandler = new PipeMessageHandler();
 var heartbeatHandler = new PipeHeartbeatMessageHandler();
 

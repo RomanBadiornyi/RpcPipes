@@ -31,19 +31,19 @@ public class PipeProtocol
         return await WaitAcknowledge(header.MessageId, true, cancellation);
     }
 
-    public async Task<bool> EndTransferMessage(Guid messageId, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
+    public async Task<bool> EndTransferMessage(Guid messageId, Func<PipeChunkWriteStream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
         await SendMessage(writeFunc, cancellation);
         return await WaitAcknowledge(messageId, true, cancellation);
     }
 
-    public async Task<bool> TransferMessage(PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
+    public async Task<bool> TransferMessage(PipeMessageHeader header, Func<PipeChunkWriteStream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
         await BeginTransferMessage(header, cancellation);
         return await EndTransferMessage(header.MessageId, writeFunc, cancellation);
     }
 
-    public async Task<bool> TryTransferMessage(PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
+    public async Task<bool> TryTransferMessage(PipeMessageHeader header, Func<PipeChunkWriteStream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
         if (await BeginTransferMessage(header, cancellation))
             await EndTransferMessage(header.MessageId, writeFunc, cancellation);
@@ -78,7 +78,7 @@ public class PipeProtocol
         return message;
     }
 
-    public async Task<T> EndReceiveMessage<T>(Guid messageId, Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
+    public async Task<T> EndReceiveMessage<T>(Guid messageId, Func<PipeChunkReadStream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
         T message;
         var readBytes = 0L;
@@ -104,7 +104,7 @@ public class PipeProtocol
         return message;
     }
 
-    public async Task<(T Message, bool Received)> TryReceiveMessage<T>(Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
+    public async Task<(T Message, bool Received)> TryReceiveMessage<T>(Func<PipeChunkReadStream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
         var message = await BeginReceiveMessage<PipeMessageHeader, PipeMessageHeader>(HeaderToMessage, cancellation);
         if (message != default && message.Ready)
@@ -129,7 +129,7 @@ public class PipeProtocol
         }
     }
 
-    private async Task SendMessage(Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
+    private async Task SendMessage(Func<PipeChunkWriteStream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
         var chunkBuffer = _arrayPool.Rent(_contentBuffer);
         try

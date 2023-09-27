@@ -48,8 +48,8 @@ public class PipeAsyncMessageHeader : PipeMessageHeader
 
 public class PipeAckMessage
 {
-    public Guid MessageId { get; set;}
-    public bool AckReceived { get; set;}
+    public Guid MessageId { get; private set;}
+    public bool AckReceived { get; private set;}
 
     public PipeAckMessage()
     {
