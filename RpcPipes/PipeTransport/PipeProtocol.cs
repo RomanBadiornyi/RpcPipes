@@ -93,10 +93,6 @@ public class PipeProtocol
         {
             throw new PipeDataException(e.Message, e);
         }
-        catch (Exception e)
-        {
-            throw e;
-        }
         finally
         {
             ArrayPool<byte>.Shared.Return(chunkBuffer);
