@@ -141,7 +141,8 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         finally
         {
             message.HeartbeatCheckHandle.Release();
-            message.HeartbeatCheckTime = DateTime.Now;
+            message.HeartbeatCheckTime = DateTime.UtcNow;
+            message.HeartbeatForced = false;
             await TryRedoHeartbeat(message, cancellation);
         }
     }
@@ -180,7 +181,7 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
 
         var pipeMessageHeader = new PipeMessageHeader { MessageId = heartbeatMessage.Id };
         await protocol.TransferMessage(pipeMessageHeader, WriteHeartbeat, cancellation);
-        var (pipeHeartbeat, received) =  await protocol.ReceiveMessage(ReadHeartbeat, cancellation);
+        var (pipeHeartbeat, received) =  await protocol.TryReceiveMessage(ReadHeartbeat, cancellation);
         if (received)
         {
             if (pipeHeartbeat != null)
@@ -207,7 +208,9 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
 
     private bool ShouldDoHeartbeat(PipeClientHeartbeatMessage message, out TimeSpan delay)
     {
-        delay = DateTime.Now - message.HeartbeatCheckTime;
+        if (message.HeartbeatForced || message.HeartbeatCheckTime == DateTime.MinValue)
+            return true;
+        delay = DateTime.UtcNow - message.HeartbeatCheckTime;
         if (delay > message.HeartbeatCheckFrequency)
             return true;
         return false;

@@ -102,14 +102,17 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
 
     internal override async ValueTask RequestMessageSent(PipeClientHeartbeatMessage requestMessage)
     {
+        requestMessage.HeartbeatStarted = true;
         await HeartbeatOut.Publish(requestMessage);
     }
 
     public override async Task<TRep> SendRequest<TReq, TRep>(TReq request, PipeRequestContext context, CancellationToken cancellation)
     {
         //fail early if request is canalled
-        if (_requestsCancellation.Token.IsCancellationRequested || cancellation.IsCancellationRequested)
+        if (cancellation.IsCancellationRequested)
             throw new TaskCanceledException("Request cancelled due to cancellation of client");
+        if (_requestsCancellation.Token.IsCancellationRequested)
+            throw new TaskCanceledException("Request cancelled due to dispose of client");            
 
         var requestTaskSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -121,18 +124,26 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             requestTaskSource.SetException(new TaskCanceledException("Request cancelled due to failed heartbeat")));
 
         //if client gets disposed or user cancels execution - MARK request as canceled and let it complete using heartbeat logic
-        using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(_requestsCancellation.Token, cancellation);
-
+        using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(_requestsCancellation.Token, cancellation);        
         var requestMessage = new PipeClientRequestMessage(Guid.NewGuid())
         {
             RequestTask = requestTaskSource,
             RequestCancellation = requestCancellation.Token,
 
             HeartbeatCancellation = heartbeatCancellation,
-            HeartbeatCheckHandle = heartbeatSync,
-            HeartbeatCheckTime = DateTime.Now,
+            HeartbeatCheckHandle = heartbeatSync,            
             HeartbeatCheckFrequency = context.Heartbeat
         };
+
+        requestCancellation.Token.Register(async () => {
+            //we run heartbeat with timeout but if user cancels currently running task -
+            //we force heartbeat to be send to server to notify it about cancellation as soon as possible
+            if (requestMessage.HeartbeatStarted)
+            {
+                requestMessage.HeartbeatForced = true;
+                await HeartbeatOut.Publish(requestMessage);
+            }            
+        });
 
         var pipeRequest = new PipeMessageRequest<TReq>();
         var pipeResponse = new PipeMessageResponse<TRep>();
@@ -152,8 +163,8 @@ public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncD
             //if we managed to add item to requests queue but we see client was stopped,
             //that means that possibly Dispose call doesn't know about this task and
             //to resolve it do not send this message to queue and manually cancel it here
-            var requestCancelledError = new TaskCanceledException("Request cancelled due to cancellation of client");
-            if (_requestsCancellation.IsCancellationRequested)
+            var requestCancelledError = new TaskCanceledException("Request execution cancelled due to cancellation of client");
+            if (requestCancellation.IsCancellationRequested)
                 requestMessage.RequestTask.TrySetException(requestCancelledError);
             else
                 await RequestOut.Publish(requestMessage);

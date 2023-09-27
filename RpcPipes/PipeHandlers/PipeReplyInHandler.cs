@@ -31,34 +31,32 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
 
     public async Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
-        PipeClientRequestMessage requestMessage = null;
-        var header = await protocol
-            .BeginReceiveMessage(
-                new PipeMessageHeader(), 
-                h => 
-                { 
-                    requestMessage = _requestHandler.GetRequestMessageById(h.MessageId);
-                    if (requestMessage == null)
-                        _logger.LogWarning("received reply message {MessageId} not found in request queue", h.MessageId);
-                    return requestMessage != null;
-                }, cancellation);
-        if (header != null && requestMessage != null)
+        var message = await protocol.BeginReceiveMessage<PipeMessageHeader, PipeClientRequestMessage>(HeaderToMessage, cancellation);
+        if (message != default)
         {
-            await requestMessage.HeartbeatCheckHandle.WaitAsync(cancellation);
+            await message.HeartbeatCheckHandle.WaitAsync(cancellation);
             try
             {
                 //ensure we stop heartbeat task as soon as we started receiving reply
-                requestMessage.RequestCompleted = true;
-                _logger.LogDebug("received reply message {MessageId}, cancelled heartbeat updated", requestMessage.Id);
-                await ReceiveMessage(requestMessage, protocol, cancellation);   
+                message.RequestCompleted = true;
+                _logger.LogDebug("received reply message {MessageId}, cancelled heartbeat updated", message.Id);
+                await ReceiveMessage(message, protocol, cancellation);   
             }
             finally
             {
-                requestMessage.HeartbeatCheckHandle.Release();
+                message.HeartbeatCheckHandle.Release();
             }            
             return false;
         }
         return true;
+
+        PipeClientRequestMessage HeaderToMessage(PipeMessageHeader header)
+        {
+            var message = _requestHandler.GetRequestMessageById(header.MessageId);
+            if (message == null)
+                _logger.LogWarning("received reply message {MessageId} not found in request queue", header.MessageId);
+            return message;
+        }
     }
 
     private async Task ReceiveMessage(PipeClientRequestMessage requestMessage, PipeProtocol protocol, CancellationToken cancellation)
@@ -70,7 +68,7 @@ internal class PipeReplyInHandler : IPipeMessageReceiver
         }
         catch (OperationCanceledException)
         {
-            requestMessage.RequestTask.TrySetCanceled();
+            requestMessage.RequestTask.TrySetException(new OperationCanceledException("Reply rejected due to dispose of client"));
         }
         catch (Exception e)
         {

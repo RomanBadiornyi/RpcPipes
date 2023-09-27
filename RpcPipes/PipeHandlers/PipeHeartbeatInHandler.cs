@@ -40,7 +40,7 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
     public override async Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
         TP pipeHeartbeat;
-        var (pipeHeartbeatRequest, pipeHeartbeatRequestReceived) = await protocol.ReceiveMessage(ReadHeartbeat, cancellation);
+        var (pipeHeartbeatRequest, pipeHeartbeatRequestReceived) = await protocol.TryReceiveMessage(ReadHeartbeat, cancellation);
         if (pipeHeartbeatRequestReceived && pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
         {
             pipeHeartbeat = _heartbeatHandler.HeartbeatMessage(pipeHeartbeatRequest.Id);

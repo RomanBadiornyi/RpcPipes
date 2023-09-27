@@ -45,7 +45,9 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
     if (runCancellation.IsCancellationRequested)
         continue;
     
+    totalTime.Stop();
     await Task.Delay(TimeSpan.FromSeconds(5));
+    totalTime.Start();
 
     Console.WriteLine("=============================================");
     Console.WriteLine($"Running {runIndex + 1} time");    
@@ -97,9 +99,11 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
                 Console.WriteLine("Heartbeat updated {0}", heartbeatReceiver.ProgressMessages);
                 Console.WriteLine("Replies {0}", replies.Length);
                 Console.WriteLine("Errors {0}", errors.Length);                
-                foreach (var e in errors.Take(10))
+                foreach (var e in errors.GroupBy(e => e.Error.ToString()).Take(10))
                 {
-                    logger.LogError(e.Error.Message);
+                    var groupCount = e.Count();
+                    var groupError = e.First().Error;
+                    logger.LogError("Received {ErrorsCount} errors: {ErrorMessage}", groupCount, $"{groupError.GetType().Name}: {groupError.Message}");
                 }        
             }
             

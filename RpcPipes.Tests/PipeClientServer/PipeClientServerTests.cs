@@ -305,7 +305,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var exception = Assert.ThrowsAsync<TaskCanceledException>(() =>
             pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
         Assert.That(exception, Is.Not.Null);
-        Assert.That(exception.Message, Does.Contain("Request cancelled due to cancellation of client"));
+        Assert.That(exception.Message, Does.Contain("Request cancelled due to dispose of client"));
 
         ServerStop.Cancel();
         await ServerTask;
@@ -512,6 +512,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var messageHandler = Substitute.ForPartsOf<PipeMessageHandler>();
         messageHandler.HeartbeatMessage(Arg.Any<object>())
             .Returns(_ => new PipeHeartbeatMessage(0.5, ""));
+        //should be no progress updates when serializer starts
         var serializer = Substitute.ForPartsOf<PipeSerializer>();
         serializer.ReadRequest<PipeRequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
             .Returns(args => Serializer.ReadRequest<PipeRequestMessage>((Stream)args[0], (CancellationToken)args[1]))
@@ -536,7 +537,9 @@ public class PipeClientServerTests : BasePipeClientServerTests
             _ = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
         }
 
-        Assert.That(HeartbeatReplies, Has.All.Matches<PipeHeartbeatMessage>(m => CompareDouble(m.Progress, 0.5, 0.01)));
+        Assert.That(HeartbeatReplies, Has.All.Matches<PipeHeartbeatMessage>(m => 
+            CompareDouble(m.Progress, 0.5, 0.01) || 
+            CompareDouble(m.Progress, 1.0, 0.01)));
 
         ServerStop.Cancel();
         await ServerTask;

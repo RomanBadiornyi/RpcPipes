@@ -36,29 +36,28 @@ internal class PipeRequestInHandler : IPipeMessageReceiver
 
     public async Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
-        PipeServerRequestMessage requestMessage = null;
-        var header = await protocol
-            .BeginReceiveMessage(
-                new PipeAsyncMessageHeader(),
-                h => {
-                //ensure we add current request to outstanding messages before we complete reading request payload
-                //this way we ensure that when client starts doing heartbeat calls - we already can reply as we know about this message
-                requestMessage = new PipeServerRequestMessage(h.MessageId, h.ReplyPipe);
-                if (!_onMessageReceived.Invoke(requestMessage, cancellation))
-                    requestMessage = null;
-                return requestMessage != null;
-            }, cancellation);
-        if (header != null && requestMessage != null)
+        var message = await protocol.BeginReceiveMessage<PipeAsyncMessageHeader, PipeServerRequestMessage>(HeaderToMessage, cancellation);
+        if (message != default)
         {
-            if (await requestMessage.ReadRequest.Invoke(protocol, cancellation))
+            if (await message.ReadRequest.Invoke(protocol, cancellation))
             {
-                _logger.LogDebug("scheduling request execution for message {MessageId}", requestMessage.Id);
+                _logger.LogDebug("scheduling request execution for message {MessageId}", message.Id);
                 PendingMessagesCounter.Add(1);
-                ThreadPool.QueueUserWorkItem(ExecuteRequest, requestMessage);
+                ThreadPool.QueueUserWorkItem(ExecuteRequest, message);
             }
             return false;
         }
         return true;
+
+        PipeServerRequestMessage HeaderToMessage(PipeAsyncMessageHeader header)
+        {
+            //ensure we add current request to outstanding messages before we complete reading request payload
+            //this way we ensure that when client starts doing heartbeat calls - we already can reply as we know about this message
+            var message = new PipeServerRequestMessage(header.MessageId, header.ReplyPipe);
+            if (!_onMessageReceived.Invoke(message, cancellation))
+                return default;
+            return message;
+        }
     }
 
     private void ExecuteRequest(object state)

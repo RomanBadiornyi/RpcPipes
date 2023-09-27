@@ -23,6 +23,12 @@ public class PipeProtocol
         return await WaitAcknowledge(header.MessageId, false, cancellation);
     }
 
+    public async Task<bool> TryBeginTransferMessage(PipeMessageHeader header, CancellationToken cancellation)
+    {
+        await SendMessageHeader(header, cancellation);
+        return await WaitAcknowledge(header.MessageId, true, cancellation);
+    }
+
     public async Task<bool> EndTransferMessage(Guid messageId, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
         await SendMessage(writeFunc, cancellation);
@@ -31,40 +37,39 @@ public class PipeProtocol
 
     public async Task<bool> TransferMessage(PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
-        var ack = await BeginTransferMessage(header, cancellation);
-        if (ack)
-            return await EndTransferMessage(header.MessageId, writeFunc, cancellation);
-        return false;
+        await BeginTransferMessage(header, cancellation);
+        return await EndTransferMessage(header.MessageId, writeFunc, cancellation);
     }
 
     public async Task<bool> TryTransferMessage(PipeMessageHeader header, Func<Stream, CancellationToken, Task> writeFunc, CancellationToken cancellation)
     {
-        await SendMessageHeader(header, cancellation);
-        var ack = await WaitAcknowledge(header.MessageId, true, cancellation);
-        if (ack)
+        if (await BeginTransferMessage(header, cancellation))
             await EndTransferMessage(header.MessageId, writeFunc, cancellation);
         return false;
     }
 
-    public async Task<THeader> BeginReceiveMessage<THeader>(THeader messageHeader, Func<THeader, bool> onAcceptAction, CancellationToken cancellation)
-        where THeader : PipeMessageHeader
+    public async Task<TMessage> BeginReceiveMessage<THeader, TMessage>(Func<THeader, TMessage> messageFunc, CancellationToken cancellation)
+        where THeader : PipeMessageHeader, new()
+        where TMessage : class
     {
+        var messageHeader = new THeader();
+        TMessage message = default;
         var chunkBuffer = ArrayPool<byte>.Shared.Rent(_headerBuffer);
         try
         {
             await using var pipeStream = new PipeChunkReadStream(chunkBuffer, _headerBuffer, _stream, cancellation);
             if (await messageHeader.TryReadHeaderFromStream(pipeStream, cancellation))
             {
-                var accept = onAcceptAction?.Invoke(messageHeader) ?? true;
-                await SendAcknowledge(messageHeader.MessageId, accept, cancellation);
-                return messageHeader;
+                message = messageFunc.Invoke(messageHeader);                
+                return message;
             }
         }
         finally
         {
+            await SendAcknowledge(messageHeader.MessageId, message != default, cancellation);
             ArrayPool<byte>.Shared.Return(chunkBuffer);
         }
-        return null;
+        return message;
     }
 
     public async Task<T> EndReceiveMessage<T>(Guid messageId, Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
@@ -88,12 +93,15 @@ public class PipeProtocol
         return message;
     }
 
-    public async Task<(T Message, bool Received)> ReceiveMessage<T>(Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
+    public async Task<(T Message, bool Received)> TryReceiveMessage<T>(Func<Stream, CancellationToken, ValueTask<T>> readFunc, CancellationToken cancellation)
     {
-        var header = await BeginReceiveMessage(new PipeMessageHeader(), null, cancellation);
-        if (header != null)
+        var header = await BeginReceiveMessage<PipeMessageHeader, PipeMessageHeader>(HeaderToMessage, cancellation);
+        if (header.Ready)
             return (await EndReceiveMessage(header.MessageId, readFunc, cancellation), true);
         return (default, false);
+
+        static PipeMessageHeader HeaderToMessage(PipeMessageHeader h)
+            => h;
     }
 
     private async Task SendMessageHeader(PipeMessageHeader header, CancellationToken cancellation)

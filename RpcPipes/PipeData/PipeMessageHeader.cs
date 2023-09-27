@@ -5,6 +5,7 @@ namespace RpcPipes.PipeData;
 public class PipeMessageHeader
 {
     public Guid MessageId { get; set; }
+    public bool Ready { get; protected set;}    
 
     public virtual async Task WriteHeaderToStream(PipeChunkWriteStream stream, CancellationToken cancellation)
     {
@@ -13,12 +14,13 @@ public class PipeMessageHeader
 
     public virtual async Task<bool> TryReadHeaderFromStream(PipeChunkReadStream stream, CancellationToken cancellation)
     {
-        return await stream.ReadTransaction(
+        Ready =  await stream.ReadTransaction(
             new Func<PipeChunkReadStream, Task<bool>>[] 
             {
                 s => s.TryReadGuid(val => MessageId = val, cancellation)
             }
         );
+        return Ready;
     }
 }
 
@@ -34,11 +36,12 @@ public class PipeAsyncMessageHeader : PipeMessageHeader
 
     public override async Task<bool> TryReadHeaderFromStream(PipeChunkReadStream stream, CancellationToken cancellation)
     {
-        return await stream.ReadTransaction(
+        Ready = await stream.ReadTransaction(
             new Func<PipeChunkReadStream, Task<bool>>[] 
             {
                 s => s.TryReadGuid(val => MessageId = val, cancellation),
                 s => s.TryReadString(val => ReplyPipe = val, cancellation)
             });
+        return Ready;
     }
 }
