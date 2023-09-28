@@ -1,7 +1,6 @@
 namespace RpcPipes.PipeHeartbeat;
 
-public interface IPipeHeartbeatReceiver<in TP>
-    where TP : IPipeHeartbeat
+public interface IPipeHeartbeatReceiver<TP>
 {
-    Task OnHeartbeatMessage(TP heartbeat);
+    Task OnHeartbeatMessage(PipeMessageHeartbeat<TP> heartbeat);
 }

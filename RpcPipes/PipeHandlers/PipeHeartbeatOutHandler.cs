@@ -20,7 +20,7 @@ internal abstract class PipeHeartbeatOutHandler : IPipeMessageSender<PipeClientH
 }
 
 internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
-    where TP: IPipeHeartbeat
+    where TP: class
 {
     private readonly ILogger _logger;
     public readonly string _pipe;
@@ -198,8 +198,8 @@ internal class PipeHeartbeatOutHandler<TP> : PipeHeartbeatOutHandler
         async Task WriteHeartbeat(PipeChunkWriteStream stream, CancellationToken c)
             => await pipeHeartbeatRequest.WriteToStream(stream, c);
 
-        async ValueTask<TP> ReadHeartbeat(Stream stream, CancellationToken c)
-            => await _messageWriter.ReadData<TP>(stream, c);
+        async ValueTask<PipeMessageHeartbeat<TP>> ReadHeartbeat(Stream stream, CancellationToken c)
+            => await _messageWriter.ReadHeartbeat<TP>(stream, c);
     }
 
     private bool ShouldDoHeartbeat(PipeClientHeartbeatMessage message, out TimeSpan delay)

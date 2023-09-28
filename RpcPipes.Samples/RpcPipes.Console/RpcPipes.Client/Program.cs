@@ -64,12 +64,12 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
 
         async Task RunClientTasks(int clientId)
         {
-            var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeHeartbeatMessage>>>();
+            var logger = serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeState>>>();
             var serializer = new PipeMessagePackSerializer();
             var heartbeatReceiver = new PipeHeartbeatReceiverCounter();            
             var receivePipe = clientId.ToString();
             
-            await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(logger, sendPipe, receivePipe, connections, heartbeatReceiver, serializer); 
+            await using var pipeClient = new PipeTransportClient<PipeState>(logger, sendPipe, receivePipe, connections, heartbeatReceiver, serializer); 
             var c = pipeClient;
             
             runCancellation.Token.Register(async () => 
@@ -80,8 +80,8 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
             });
 
             logger.LogInformation("Starting client, press Ctrl+C to interrupt");                        
-            var replies = Array.Empty<(PipeReplyMessage Reply, Exception Error)>();
-            var errors = Array.Empty<(PipeReplyMessage Reply, Exception Error)>();
+            var replies = Array.Empty<(PipeReply Reply, Exception Error)>();
+            var errors = Array.Empty<(PipeReply Reply, Exception Error)>();
             try
             {
                 
@@ -106,9 +106,9 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
                 }        
             }
             
-            async Task<(PipeReplyMessage Reply, Exception Error)> RunTaskHandleError(int requestId, PipeTransportClient transport)
+            async Task<(PipeReply Reply, Exception Error)> RunTaskHandleError(int requestId, PipeTransportClient transport)
             {
-                var request = new PipeRequestMessage($"Sample request {requestId}", delay);
+                var request = new PipeRequest($"Sample request {requestId}", delay);
                 var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(runCancellation.Token);
                 var requestTime = TimeSpan.FromMinutes(timeoutMinutes);
                 var heartbeatTime = TimeSpan.FromSeconds(heartbeat);
@@ -121,7 +121,7 @@ for (var runIndex = 0; runIndex < runsCount; runIndex++)
                         Heartbeat = heartbeatTime
                     };
                     await Task.Delay(TimeSpan.FromSeconds(rand.Next(0, startUpDelay)));
-                    return (await transport.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, requestCancellation.Token), null);
+                    return (await transport.SendRequest<PipeRequest, PipeReply>(request, requestContext, requestCancellation.Token), null);
                 }
                 catch (Exception e)
                 {

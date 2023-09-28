@@ -3,12 +3,11 @@ using System.Collections.Concurrent;
 namespace RpcPipes.PipeHeartbeat;
 
 public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
-    where TOut : IPipeHeartbeat
 {
     private readonly ConcurrentDictionary<Guid, PipeHeartbeatMessageState<TOut>> _messageHandleByMessageId = new();
 
-    protected abstract TOut GetNotStartedHeartbeat();
-    protected abstract TOut GetCompletedHeartbeat();
+    protected abstract PipeMessageHeartbeat<TOut> GetNotStartedHeartbeat();
+    protected abstract PipeMessageHeartbeat<TOut> GetCompletedHeartbeat();
 
     public bool StartMessageHandling(Guid messageId, CancellationToken token, IPipeHeartbeatReporter heartbeatReporter)
     {
@@ -40,7 +39,7 @@ public abstract class PipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler<TOut>
         return false;
     }
 
-    public virtual TOut HeartbeatMessage(Guid messageId)
+    public virtual PipeMessageHeartbeat<TOut> HeartbeatMessage(Guid messageId)
     {
         if (_messageHandleByMessageId.TryGetValue(messageId, out var handle))
         {

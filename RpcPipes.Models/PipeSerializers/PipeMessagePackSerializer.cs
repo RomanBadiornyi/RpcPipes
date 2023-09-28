@@ -1,5 +1,6 @@
 using MessagePack;
 using RpcPipes.PipeData;
+using RpcPipes.PipeHeartbeat;
 
 namespace RpcPipes.Models.PipeSerializers;
 
@@ -8,11 +9,11 @@ public class PipeMessagePackSerializer : IPipeMessageWriter
     private static readonly MessagePackSerializerOptions _options = MessagePackSerializerOptions.Standard
         .WithCompression(MessagePackCompression.None);
 
-    public async Task WriteData<T>(T message, Stream stream, CancellationToken cancellation)
-        => await MessagePackSerializer.SerializeAsync(stream, message, _options, cancellation);
+    public async Task WriteHeartbeat<T>(PipeMessageHeartbeat<T> message, Stream stream, CancellationToken cancellation)
+        => await MessagePackSerializer.SerializeAsync(stream, message.FromHeartbeat(), _options, cancellation);
 
-    public async ValueTask<T> ReadData<T>(Stream stream, CancellationToken cancellation)
-        => await MessagePackSerializer.DeserializeAsync<T>(stream, _options, cancellation);
+    public async ValueTask<PipeMessageHeartbeat<T>> ReadHeartbeat<T>(Stream stream, CancellationToken cancellation)
+        => (await MessagePackSerializer.DeserializeAsync<MpPipeMessageHeartbeat<T>>(stream, _options, cancellation)).ToHeartbeat();
 
     public async Task WriteRequest<T>(PipeMessageRequest<T> message, Stream stream, CancellationToken cancellation)
         => await MessagePackSerializer.SerializeAsync(stream, message.FromRequest(), _options, cancellation);
@@ -48,7 +49,14 @@ public class PipeMessagePackSerializer : IPipeMessageWriter
         public string Message { get; set; }
         public MpPipeMessageException InnerException { get; set; }
         public List<string> StackTrace { get; set; }
-   }
+    }
+
+    [MessagePackObject(true)]
+    public class MpPipeMessageHeartbeat<T>
+    {
+        public double Progress { get; set; }
+        public T RequestState { get; set; }
+    }
 }
 
 internal static class PipeModelConverters
@@ -112,5 +120,23 @@ internal static class PipeModelConverters
                 InnerException = e.InnerException.ToError() 
             }
         : null;
+
+    public static PipeMessagePackSerializer.MpPipeMessageHeartbeat<T> FromHeartbeat<T>(this PipeMessageHeartbeat<T> h)
+        => h != null 
+        ? new() 
+            { 
+                Progress = h.Progress, 
+                RequestState = h.RequestState 
+            }
+        : null;
+
+    public static PipeMessageHeartbeat<T> ToHeartbeat<T>(this PipeMessagePackSerializer.MpPipeMessageHeartbeat<T> h)
+        => h != null 
+        ? new() 
+            { 
+                Progress = h.Progress, 
+                RequestState = h.RequestState, 
+            }
+        : null;        
 
 }

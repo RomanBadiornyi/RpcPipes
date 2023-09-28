@@ -8,6 +8,7 @@ using RpcPipes.Models.PipeMessageHandlers;
 using RpcPipes.Models.PipeHeartbeat;
 using RpcPipes.Models.PipeSerializers;
 using RpcPipes.Models;
+using RpcPipes.PipeHeartbeat;
 
 namespace RpcPipes.Tests.PipeClientServer;
 
@@ -27,12 +28,12 @@ public class BasePipeClientServerTests
 
     protected ILogger TestsLogger;
     protected ILogger<PipeTransportServer> ServerLogger;
-    protected ILogger<PipeTransportClient<PipeHeartbeatMessage>> ClientLogger;
+    protected ILogger<PipeTransportClient<PipeState>> ClientLogger;
 
     protected PipeJsonSerializer Serializer;
     protected PipeMessageHandler MessageHandler;
     protected PipeHeartbeatMessageHandler HeartbeatHandler;
-    protected ConcurrentBag<PipeHeartbeatMessage> HeartbeatReplies;
+    protected ConcurrentBag<PipeMessageHeartbeat<PipeState>> HeartbeatReplies;
     protected PipeHeartbeatReceiver HeartbeatMessageReceiver;
 
     [OneTimeSetUp]
@@ -97,7 +98,7 @@ public class BasePipeClientServerTests
                 loggingBuilder.SetMinimumLevel(LogLevel.Trace);
                 loggingBuilder.AddNUnitLogger();
             }).BuildServiceProvider();
-        ClientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeHeartbeatMessage>>>();
+        ClientLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportClient<PipeState>>>();
         ServerLogger = _serviceProvider.GetRequiredService<ILogger<PipeTransportServer>>();
         TestsLogger = _serviceProvider.GetRequiredService<ILogger<BasePipeClientServerTests>>();
         TestsLogger.LogInformation($"=== begin {TestContext.CurrentContext.Test.Name} ===");
@@ -118,7 +119,7 @@ public class BasePipeClientServerTests
         MessageHandler = new PipeMessageHandler();
         HeartbeatHandler = new PipeHeartbeatMessageHandler();
 
-        HeartbeatReplies = new ConcurrentBag<PipeHeartbeatMessage>();
+        HeartbeatReplies = new ConcurrentBag<PipeMessageHeartbeat<PipeState>>();
         HeartbeatMessageReceiver = new PipeHeartbeatReceiver(HeartbeatReplies);
     }
 

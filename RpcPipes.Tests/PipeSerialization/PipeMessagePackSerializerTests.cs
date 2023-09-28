@@ -11,13 +11,13 @@ public class PipeMessagePackSerializerTests
     public async Task SerializeDeserialize_Request_Completes()
     {
         var messagePackSerializer = new PipeMessagePackSerializer();
-        var r = new PipeRequestMessage("hello", 0);
-        var request = new PipeMessageRequest<PipeRequestMessage> 
+        var r = new PipeRequest("hello", 0);
+        var request = new PipeMessageRequest<PipeRequest> 
             { Request = r, Heartbeat = TimeSpan.FromSeconds(1), Deadline = TimeSpan.FromSeconds(2) };
         using var stream = new MemoryStream();
         await messagePackSerializer.WriteRequest(request, stream, CancellationToken.None);
         stream.Position = 0;
-        var requestOut = await messagePackSerializer.ReadRequest<PipeRequestMessage>(stream, CancellationToken.None);
+        var requestOut = await messagePackSerializer.ReadRequest<PipeRequest>(stream, CancellationToken.None);
 
         Assert.That(requestOut, Is.Not.Null);
         Assert.That(requestOut.Request, Is.Not.Null);
@@ -28,7 +28,7 @@ public class PipeMessagePackSerializerTests
     public async Task SerializeDeserialize_Response_Completes()
     {
         var messagePackSerializer = new PipeMessagePackSerializer();
-        var r = new PipeReplyMessage("hello");
+        var r = new PipeReply("hello");
         var e = new PipeMessageException()
         {
             ClassName = "c",
@@ -41,12 +41,12 @@ public class PipeMessagePackSerializerTests
                 StackTrace = new List<string> { "inner_s" }
             } 
         };
-        var request = new PipeMessageResponse<PipeReplyMessage> 
+        var request = new PipeMessageResponse<PipeReply> 
             { Reply = r, ReplyError = e };
         using var stream = new MemoryStream();
         await messagePackSerializer.WriteResponse(request, stream, CancellationToken.None);
         stream.Position = 0;
-        var requestOut = await messagePackSerializer.ReadResponse<PipeReplyMessage>(stream, CancellationToken.None);
+        var requestOut = await messagePackSerializer.ReadResponse<PipeReply>(stream, CancellationToken.None);
 
         Assert.That(requestOut, Is.Not.Null);
         Assert.That(requestOut.Reply, Is.Not.Null);

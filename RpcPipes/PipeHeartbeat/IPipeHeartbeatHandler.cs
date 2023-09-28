@@ -12,7 +12,6 @@ public class PipeMessageState
 }
 
 internal class PipeHeartbeatMessageState<TOut> : PipeMessageState
-    where TOut : IPipeHeartbeat
 {
     public IPipeHeartbeatReporter<TOut> Reporter { get; set; }    
 }
@@ -28,9 +27,7 @@ public interface IPipeHeartbeatHandler
     bool EndMessageHandling(Guid messageId);
 }
 
-public interface IPipeHeartbeatHandler<out TOut> : IPipeHeartbeatHandler
-    where TOut : IPipeHeartbeat
+public interface IPipeHeartbeatHandler<TOut> : IPipeHeartbeatHandler
 {
-
-    TOut HeartbeatMessage(Guid messageId);
+    PipeMessageHeartbeat<TOut> HeartbeatMessage(Guid messageId);
 }

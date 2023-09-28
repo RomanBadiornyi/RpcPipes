@@ -4,8 +4,7 @@ public interface IPipeHeartbeatReporter
 {
 }
 
-public interface IPipeHeartbeatReporter<out TOut> : IPipeHeartbeatReporter
-    where TOut : IPipeHeartbeat
+public interface IPipeHeartbeatReporter<TOut> : IPipeHeartbeatReporter
 {
-    TOut HeartbeatMessage(object message);
+    PipeMessageHeartbeat<TOut> HeartbeatMessage(object message);
 }

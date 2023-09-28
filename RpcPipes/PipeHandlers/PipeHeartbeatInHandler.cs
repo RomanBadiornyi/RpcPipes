@@ -14,7 +14,7 @@ internal abstract class PipeHeartbeatInHandler : IPipeMessageReceiver
 }
 
 internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
-    where TP: IPipeHeartbeat
+    where TP: class
 {
     private readonly ILogger _logger;
     private readonly IPipeHeartbeatHandler<TP> _heartbeatHandler;
@@ -39,7 +39,7 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
 
     public override async Task<bool> ReceiveMessage(PipeProtocol protocol, CancellationToken cancellation)
     {
-        TP pipeHeartbeat;
+        PipeMessageHeartbeat<TP> pipeHeartbeat;
         var (pipeHeartbeatRequest, pipeHeartbeatRequestReceived) = await protocol.TryReceiveMessage(ReadHeartbeat, cancellation);
         if (pipeHeartbeatRequestReceived && pipeHeartbeatRequest != null && !cancellation.IsCancellationRequested)
         {
@@ -74,6 +74,6 @@ internal class PipeHeartbeatInHandler<TP> : PipeHeartbeatInHandler
             => await new PipeRequestHeartbeat().ReadFromStream(stream, c);
 
         async Task WriteHeartbeat(Stream stream, CancellationToken c)
-            => await _messageWriter.WriteData(pipeHeartbeat, stream, c);
+            => await _messageWriter.WriteHeartbeat(pipeHeartbeat, stream, c);
     }
 }

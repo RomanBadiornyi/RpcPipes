@@ -59,7 +59,7 @@ public class PipeTransportServer
         IPipeMessageHandler<TReq, TRep> messageHandler,
         IPipeHeartbeatHandler<TP> heartbeatHandler,
         CancellationToken token)
-        where TP: IPipeHeartbeat
+        where TP: class
     {
         lock (_sync)
         {

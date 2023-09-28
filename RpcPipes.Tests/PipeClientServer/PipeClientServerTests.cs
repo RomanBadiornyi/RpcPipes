@@ -16,26 +16,27 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_ReplyReceived()
     {
-        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
-            .Returns(new PipeReplyMessage("hi"));
+        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequest, PipeReply>>();
+        messageHandler.HandleRequest(Arg.Any<PipeRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PipeReply("hi"));
 
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        //test that client can be dispose after creation without sending any requests
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
         }
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 0);
+            var request = new PipeRequest("hello world", 0);
             var requestContext = new PipeRequestContext();
-            var reply = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            var reply = await pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
 
@@ -48,14 +49,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
     {
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 10);
+            var request = new PipeRequest("hello world", 10);
             var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeConnectionsExhausted>(() =>
-                pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
+                pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None));
             Assert.That(exception, Is.Not.Null);
             Assert.That(exception.Message, Does.Contain("run out of available connections"));
             Assert.That(exception.InnerException.Message, Does.Contain("timeout"));
@@ -67,16 +68,16 @@ public class PipeClientServerTests : BasePipeClientServerTests
     {
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 10);
+            var request = new PipeRequest("hello world", 10);
             var requestContext = new PipeRequestContext { Deadline = TimeSpan.FromMilliseconds(10) };
             var cancellation = new CancellationTokenSource();
             cancellation.Cancel();
             var exception = Assert.ThrowsAsync<TaskCanceledException>(() =>
-                pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, cancellation.Token));
+                pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, cancellation.Token));
             Assert.That(exception, Is.Not.Null);
         }
     }
@@ -88,14 +89,14 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 10);
+            var request = new PipeRequest("hello world", 10);
             var requestContext = new PipeRequestContext { Deadline = TimeSpan.FromMilliseconds(10) };
             var exception = Assert.ThrowsAsync<PipeServerException>(() =>
-                pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
+                pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None));
             Assert.That(exception, Is.Not.Null);
             Assert.That(exception.Message, Does.Contain("A task was canceled"));
         }
@@ -113,26 +114,26 @@ public class PipeClientServerTests : BasePipeClientServerTests
     public async Task RequestReply_OnTimeout_ReplyCancelled()
     {
         var receiveEventHandle = new ManualResetEventSlim(false);
-        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
+        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequest, PipeReply>>();
+        messageHandler.HandleRequest(Arg.Any<PipeRequest>(), Arg.Any<CancellationToken>())
             .Returns(async args =>
             {
                 receiveEventHandle.Set();
                 var wait = 0;
                 while (!((CancellationToken)args[1]).IsCancellationRequested && wait++ < 32)
                     await Task.Delay(TimeSpan.FromMilliseconds(8));
-                return new PipeReplyMessage("hi");
+                return new PipeReply("hi");
             });
 
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 0);
+            var request = new PipeRequest("hello world", 0);
 
             var requestContext = new PipeRequestContext
             {
@@ -140,7 +141,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
             };
 
             var cts = new CancellationTokenSource();
-            var sendTask = pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, cts.Token);
+            var sendTask = pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, cts.Token);
             //wait for message to arrive to server
             receiveEventHandle.Wait(TimeSpan.FromSeconds(30));
             //cancel request execution from the client side
@@ -167,8 +168,8 @@ public class PipeClientServerTests : BasePipeClientServerTests
     {
         var receivedTasksCount = 0;
         var receiveEventHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
-        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
+        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequest, PipeReply>>();
+        messageHandler.HandleRequest(Arg.Any<PipeRequest>(), Arg.Any<CancellationToken>())
             .Returns(async args =>
             {
                 var received = Interlocked.Increment(ref receivedTasksCount);
@@ -176,19 +177,19 @@ public class PipeClientServerTests : BasePipeClientServerTests
                 if (received == tasksReachingServerCount)
                     receiveEventHandle.Set();                
                 await Task.Delay(TimeSpan.FromSeconds(30), (CancellationToken)args[1]);
-                return new PipeReplyMessage("hi");
+                return new PipeReply("hi");
             });
 
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
 
-        Task<PipeReplyMessage>[] requests = null;
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        Task<PipeReply>[] requests = null;
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 0);
+            var request = new PipeRequest("hello world", 0);
             var requestContext = new PipeRequestContext { Heartbeat = TimeSpan.FromMilliseconds(10) };
             var cts = new CancellationTokenSource();
             requests = Enumerable.Range(0, tasksCount)
@@ -200,7 +201,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
                         receiveEventHandle.WaitOne(TimeSpan.FromSeconds(10));
                         await Task.Delay(TimeSpan.FromMilliseconds(i - tasksReachingServerCount));
                     }
-                    return await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, cts.Token);
+                    return await pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, cts.Token);
                 })
                 .ToArray();
             //wait for message to arrive to server
@@ -236,13 +237,13 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var receiveEventHandle = new ManualResetEventSlim(false);
         var proceedEventHandle = new ManualResetEventSlim(false);
 
-        var pipeServer1MessageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
-        pipeServer1MessageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
+        var pipeServer1MessageHandler = Substitute.For<IPipeMessageHandler<PipeRequest, PipeReply>>();
+        pipeServer1MessageHandler.HandleRequest(Arg.Any<PipeRequest>(), Arg.Any<CancellationToken>())
             .Returns(_ =>
             {
                 receiveEventHandle.Set();
                 proceedEventHandle.Wait(TimeSpan.FromSeconds(30));
-                return new PipeReplyMessage("hi");
+                return new PipeReply("hi");
             });
 
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
@@ -250,16 +251,16 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(pipeServer1MessageHandler, pipeServer1HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 1);
+            var request = new PipeRequest("hello world", 1);
             var requestContext = new PipeRequestContext
             {
                 Heartbeat = TimeSpan.FromMilliseconds(10)
             };
-            var requestTask = pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            var requestTask = pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
             receiveEventHandle.Wait(TimeSpan.FromSeconds(30));
 
             ServerStop.Cancel();
@@ -294,16 +295,16 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer);
         SetupClient(pipeClient);
 
         await pipeClient.DisposeAsync();
 
-        var request = new PipeRequestMessage("hello world", 10);
+        var request = new PipeRequest("hello world", 10);
         var requestContext = new PipeRequestContext();
         var exception = Assert.ThrowsAsync<TaskCanceledException>(() =>
-            pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
+            pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None));
         Assert.That(exception, Is.Not.Null);
         Assert.That(exception.Message, Does.Contain("Request cancelled due to dispose of client"));
 
@@ -318,7 +319,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
@@ -331,12 +332,12 @@ public class PipeClientServerTests : BasePipeClientServerTests
                 Assert.That(Connections["PipeTransportServer.server-connections"], Is.EqualTo(0));
                 Assert.That(Connections["PipeTransportServer.client-connections"], Is.EqualTo(0));
             });
-            var request = new PipeRequestMessage("hello world", 0.1);
+            var request = new PipeRequest("hello world", 0.1);
             var requestContext = new PipeRequestContext
             {
                 Heartbeat = TimeSpan.FromMilliseconds(10)
             };
-            _ = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            _ = await pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
             Assert.Multiple(() =>
             {
                 //1 connections to accept response from server
@@ -377,29 +378,29 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_SameClientIdAndMultipleConnections_AllResponsesReceived()
     {
-        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
-            .Returns(new PipeReplyMessage("hi"));
+        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequest, PipeReply>>();
+        messageHandler.HandleRequest(Arg.Any<PipeRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new PipeReply("hi"));
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 2, Serializer);
         ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 0);
+            var request = new PipeRequest("hello world", 0);
             var requestContext = new PipeRequestContext();
-            var reply = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            var reply = await pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 0);
+            var request = new PipeRequest("hello world", 0);
             var requestContext = new PipeRequestContext();
-            var reply = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            var reply = await pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
             Assert.That(reply.Reply, Is.EqualTo("hi"));
         }
 
@@ -414,7 +415,7 @@ public class PipeClientServerTests : BasePipeClientServerTests
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", clientsCount, Serializer);
         ServerTask = pipeServer.Start(MessageHandler, HeartbeatHandler, ServerStop.Token);
 
-        var replies = new ConcurrentBag<PipeReplyMessage>();
+        var replies = new ConcurrentBag<PipeReply>();
         var clientTasks = Enumerable.Range(0, clientsCount).Select(i => RunRequestOnClient(i, replies)).ToArray();
         await Task.WhenAll(clientTasks);
 
@@ -424,16 +425,16 @@ public class PipeClientServerTests : BasePipeClientServerTests
             Assert.That(replyMessages, Has.Member($"{index}"));
         }
 
-        async Task RunRequestOnClient(int clientNum, ConcurrentBag<PipeReplyMessage> results)
+        async Task RunRequestOnClient(int clientNum, ConcurrentBag<PipeReply> results)
         {
             var clientId = $"{TestContext.CurrentContext.Test.Name}.{clientNum}";
-            await using var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+            await using var pipeClient = new PipeTransportClient<PipeState>(
                 ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer);
             SetupClient(pipeClient);
 
-            var request = new PipeRequestMessage($"{clientNum}", 0);
+            var request = new PipeRequest($"{clientNum}", 0);
             var requestContext = new PipeRequestContext();
-            var reply = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            var reply = await pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
             results.Add(reply);
         }
     }
@@ -442,46 +443,46 @@ public class PipeClientServerTests : BasePipeClientServerTests
     public async Task RequestReply_ProgressUpdated()
     {
         var heartbeatSync = new object();
-        var heartbeatMessages = new ConcurrentBag<PipeHeartbeatMessage>();
-        var heartbeatMessageReceiver = Substitute.For<IPipeHeartbeatReceiver<PipeHeartbeatMessage>>();
-        heartbeatMessageReceiver.OnHeartbeatMessage(Arg.Any<PipeHeartbeatMessage>())
+        var heartbeatMessages = new ConcurrentBag<PipeMessageHeartbeat<PipeState>>();
+        var heartbeatMessageReceiver = Substitute.For<IPipeHeartbeatReceiver<PipeState>>();
+        heartbeatMessageReceiver.OnHeartbeatMessage(Arg.Any<PipeMessageHeartbeat<PipeState>>())
             .Returns(args =>
         {
-            heartbeatMessages.Add((PipeHeartbeatMessage)args[0]);
+            heartbeatMessages.Add((PipeMessageHeartbeat<PipeState>)args[0]);
             lock (heartbeatSync) { Monitor.Pulse(heartbeatSync); }
             return Task.CompletedTask;
         });
 
-        var heartbeatHandler = Substitute.ForPartsOf<PipeHeartbeatHandler<PipeHeartbeatMessage>>();
+        var heartbeatHandler = Substitute.ForPartsOf<PipeHeartbeatHandler<PipeState>>();
         heartbeatHandler.HeartbeatMessage(Arg.Any<Guid>())
             .Returns(
-                _ => new PipeHeartbeatMessage(0.1, ""),
-                _ => new PipeHeartbeatMessage(0.5, ""),
-                _ => new PipeHeartbeatMessage(1.0, ""));
+                _ => new PipeMessageHeartbeat<PipeState> { Progress = 0.1 },
+                _ => new PipeMessageHeartbeat<PipeState> { Progress = 0.5 },
+                _ => new PipeMessageHeartbeat<PipeState> { Progress = 1.0 });
 
         var receiveEventHandle = new ManualResetEventSlim(false);
         var proceedEventHandle = new ManualResetEventSlim(false);
 
-        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
+        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequest, PipeReply>>();
+        messageHandler.HandleRequest(Arg.Any<PipeRequest>(), Arg.Any<CancellationToken>())
             .Returns(_ =>
             {
                 receiveEventHandle.Set();
                 proceedEventHandle.Wait(TimeSpan.FromSeconds(30));
-                return new PipeReplyMessage("hi");
+                return new PipeReply("hi");
             });
 
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(messageHandler, heartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, heartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
             var requestContext = new PipeRequestContext { Heartbeat = TimeSpan.FromMilliseconds(5) };
-            var request = new PipeRequestMessage("hello world", 1);
-            var clientTask = pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            var request = new PipeRequest("hello world", 1);
+            var clientTask = pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
 
             receiveEventHandle.Wait(TimeSpan.FromSeconds(30));
             await Task.Run(() => {
@@ -498,9 +499,9 @@ public class PipeClientServerTests : BasePipeClientServerTests
             await clientTask;
         }
 
-        Assert.That(heartbeatMessages, Has.Some.Matches<PipeHeartbeatMessage>(m => CompareDouble(m.Progress, 0.1, 0.01)));
-        Assert.That(heartbeatMessages, Has.Some.Matches<PipeHeartbeatMessage>(m => CompareDouble(m.Progress, 0.5, 0.01)));
-        Assert.That(heartbeatMessages, Has.Some.Matches<PipeHeartbeatMessage>(m => CompareDouble(m.Progress, 1.0, 0.01)));
+        Assert.That(heartbeatMessages, Has.Some.Matches<PipeMessageHeartbeat<PipeState>>(m => CompareDouble(m.Progress, 0.1, 0.01)));
+        Assert.That(heartbeatMessages, Has.Some.Matches<PipeMessageHeartbeat<PipeState>>(m => CompareDouble(m.Progress, 0.5, 0.01)));
+        Assert.That(heartbeatMessages, Has.Some.Matches<PipeMessageHeartbeat<PipeState>>(m => CompareDouble(m.Progress, 1.0, 0.01)));
 
         ServerStop.Cancel();
         await ServerTask;
@@ -511,21 +512,21 @@ public class PipeClientServerTests : BasePipeClientServerTests
     {
         var messageHandler = Substitute.ForPartsOf<PipeMessageHandler>();
         messageHandler.HeartbeatMessage(Arg.Any<object>())
-            .Returns(_ => new PipeHeartbeatMessage(0.5, ""));
+            .Returns(_ => new PipeMessageHeartbeat<PipeState> { Progress = 0.5 });
         //should be no progress updates when serializer starts
         var serializer = Substitute.ForPartsOf<PipeJsonSerializer>();
-        serializer.ReadRequest<PipeRequestMessage>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
-            .Returns(args => Serializer.ReadRequest<PipeRequestMessage>((Stream)args[0], (CancellationToken)args[1]))
+        serializer.ReadRequest<PipeRequest>(Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(args => Serializer.ReadRequest<PipeRequest>((Stream)args[0], (CancellationToken)args[1]))
             .AndDoes(_ => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
-        serializer.WriteResponse(Arg.Any<PipeMessageResponse<PipeReplyMessage>>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>())
-            .Returns(args => Serializer.WriteResponse((PipeMessageResponse<PipeReplyMessage>)args[0], (Stream)args[1], (CancellationToken)args[2]))
+        serializer.WriteResponse(Arg.Any<PipeMessageResponse<PipeReply>>(), Arg.Any<Stream>(), Arg.Any<CancellationToken>())
+            .Returns(args => Serializer.WriteResponse((PipeMessageResponse<PipeReply>)args[0], (Stream)args[1], (CancellationToken)args[2]))
             .AndDoes(_ => Task.Delay(TimeSpan.FromMilliseconds(50)).Wait());
 
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, serializer);
         ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
         HeartbeatReplies.Clear();
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
@@ -533,11 +534,11 @@ public class PipeClientServerTests : BasePipeClientServerTests
             {
                 Heartbeat = TimeSpan.FromMilliseconds(10)
             };
-            var request = new PipeRequestMessage("hello world", 0.1);
-            _ = await pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None);
+            var request = new PipeRequest("hello world", 0.1);
+            _ = await pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None);
         }
 
-        Assert.That(HeartbeatReplies, Has.All.Matches<PipeHeartbeatMessage>(m => 
+        Assert.That(HeartbeatReplies, Has.All.Matches<PipeMessageHeartbeat<PipeState>>(m => 
             CompareDouble(m.Progress, 0.5, 0.01) || 
             CompareDouble(m.Progress, 1.0, 0.01)));
 
@@ -548,22 +549,22 @@ public class PipeClientServerTests : BasePipeClientServerTests
     [Test]
     public async Task RequestReply_WhenHandlerThrows_ErrorReturned()
     {
-        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequestMessage, PipeReplyMessage>>();
-        messageHandler.HandleRequest(Arg.Any<PipeRequestMessage>(), Arg.Any<CancellationToken>())
-            .Returns<PipeReplyMessage>(_ => throw new InvalidOperationException("handler error"));
+        var messageHandler = Substitute.For<IPipeMessageHandler<PipeRequest, PipeReply>>();
+        messageHandler.HandleRequest(Arg.Any<PipeRequest>(), Arg.Any<CancellationToken>())
+            .Returns<PipeReply>(_ => throw new InvalidOperationException("handler error"));
 
         var clientId = $"{TestContext.CurrentContext.Test.Name}.0";
         var pipeServer = new PipeTransportServer(ServerLogger, "rpc.pipe", 1, Serializer);
         ServerTask = pipeServer.Start(messageHandler, HeartbeatHandler, ServerStop.Token);
 
-        await using (var pipeClient = new PipeTransportClient<PipeHeartbeatMessage>(
+        await using (var pipeClient = new PipeTransportClient<PipeState>(
             ClientLogger, "rpc.pipe", clientId, 1, HeartbeatMessageReceiver, Serializer))
         {
             SetupClient(pipeClient);
-            var request = new PipeRequestMessage("hello world", 0);
+            var request = new PipeRequest("hello world", 0);
             var requestContext = new PipeRequestContext();
             var exception = Assert.ThrowsAsync<PipeServerException>(
-                () => pipeClient.SendRequest<PipeRequestMessage, PipeReplyMessage>(request, requestContext, CancellationToken.None));
+                () => pipeClient.SendRequest<PipeRequest, PipeReply>(request, requestContext, CancellationToken.None));
             Assert.That(exception, Is.Not.Null);
             Assert.That(exception.Message, Does.Contain("handler error"));
         }

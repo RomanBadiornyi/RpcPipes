@@ -35,7 +35,7 @@ public abstract class PipeTransportClient : PipeRequestHandler
 }
 
 public class PipeTransportClient<TP> : PipeTransportClient, IDisposable, IAsyncDisposable
-    where TP : IPipeHeartbeat
+    where TP : class
 {
     private readonly ILogger<PipeTransportClient<TP>> _logger;
     private readonly CancellationTokenSource _requestsCancellation;

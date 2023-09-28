@@ -1,11 +1,12 @@
 using MessagePack;
-using RpcPipes.PipeHeartbeat;
 
 namespace RpcPipes.Models;
 
 [MessagePackObject(true)]
-public record PipeRequestMessage(string Message, double DelaySeconds);
+public record PipeRequest(string Message, double DelaySeconds);
+
 [MessagePackObject(true)]
-public record PipeReplyMessage(string Reply);
+public record PipeReply(string Reply);
+
 [MessagePackObject(true)]
-public record PipeHeartbeatMessage(double Progress, string Stage) : IPipeHeartbeat;
+public record PipeState(string Stage, string Message);
