@@ -105,35 +105,52 @@ public class PipeConnectionPoolTests
         for (var i = 0; i < 3; i++)
         {
             var readWriteTasks = new List<Task>();
-            //use wait handles to ensure that on each iteration all 3 connections from pool will be active
-            var readWriteStartHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
-            var readWriteTaskHandles = new List<WaitHandle>();
+            var readWriteHandle = new ManualResetEventSlim(false); 
+            var connectedServer = 0;
 
-            for (var j = 0; j < _connectionPool.Instances; j++)
-            {
-                var readWriteHandle = new EventWaitHandle(false, EventResetMode.ManualReset);
-                readWriteTaskHandles.Add(readWriteHandle);
-
-                var readWriteTask = Task.Run(() => {
-                    var serverTask = _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => {
-                        connections.AddOrUpdate(stream, 1, (_, c) => c + 1);
-                        await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
-                        readWriteHandle.Set();
-                        readWriteStartHandle.WaitOne(TimeSpan.FromSeconds(5));
-                        return false;
-                    }).AsTask();
-
+            lock (readWriteHandle)
+            {                
+                for (var j = 0; j < _connectionPool.Instances; j++)
+                {
+                    var writeHandle = new ManualResetEventSlim(false);
+                    var serverTask = Task.Run(async () => 
+                    {
+                        await _connectionPool.Server.UseConnection("PipeConnectionPoolTests", null, async stream => 
+                        {
+                            var connected = Interlocked.Increment(ref connectedServer);
+                            if (connected == _connectionPool.Instances)
+                                lock (readWriteHandle)
+                                    Monitor.Pulse(readWriteHandle);
+                            if (!readWriteHandle.Wait(TimeSpan.FromSeconds(30)))
+                                throw new InvalidOperationException("no connection signal in server");                
+                            connections.AddOrUpdate(stream, 1, (_, c) => c + 1);
+                            await stream.WriteAsync(Enumerable.Range(0, 10).Select(x => (byte)x).ToArray(), _cancellationSource.Token);
+                            //do not exit from function until read notifies that it received message
+                            if (!writeHandle.Wait(TimeSpan.FromSeconds(30)))
+                                throw new InvalidOperationException("no client write signal");                        
+                            return false;
+                        });
+                    });
                     var receivedBuffer = new byte[10];
-                    var clientTask = _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => {
-                        await stream.ReadAsync(receivedBuffer, 0, 5, _cancellationSource.Token);
-                        var _ = readWriteStartHandle.WaitOne(TimeSpan.FromSeconds(5));
-                    }).AsTask();
-                    return Task.WhenAll(serverTask, clientTask);
-                });
-                readWriteTasks.Add(readWriteTask);
-            }
-            WaitHandle.WaitAll(readWriteTaskHandles.ToArray(), TimeSpan.FromSeconds(5));
-            readWriteStartHandle.Set();
+                    var clientTask = Task.Run(async () => 
+                    {
+                        await _connectionPool.Client.UseConnection("PipeConnectionPoolTests", null, async stream => 
+                        {                   
+                            if (!readWriteHandle.Wait(TimeSpan.FromSeconds(30)))
+                                throw new InvalidOperationException("no connection signal in client");                
+                            _ = await stream.ReadAsync(receivedBuffer, 0, 5, _cancellationSource.Token);
+                            //notify server that message has been received 
+                            writeHandle.Set();                        
+                        });
+                    });                                
+                    readWriteTasks.Add(Task.WhenAll(serverTask, clientTask));
+                }
+                if (!Monitor.Wait(readWriteHandle, TimeSpan.FromSeconds(30)))
+                    throw new InvalidOperationException("no connection signal");                                
+                //once we receive signal that all connections got connected and ready to start handling messages
+                //signal them to proceed
+                readWriteHandle.Set();
+            }            
             await Task.WhenAll(readWriteTasks);
         }
 
